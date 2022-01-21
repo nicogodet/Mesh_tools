@@ -5,12 +5,12 @@ on:
     tags:
       - "*"
     branches:
-      - master
+      - main
     paths:
       - 'mesh_tools/**'
   pull_request:
     branches:
-      - master
+      - main
     paths:
       - 'mesh_tools/**'
 
@@ -27,7 +27,7 @@ jobs:
           architecture: x64
 
       - name: Checkout
-        uses: actions/checkout@master
+        uses: actions/checkout@main
 
       - uses: actions/cache@v2
         with:
