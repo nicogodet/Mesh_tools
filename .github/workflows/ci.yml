@@ -81,11 +81,11 @@ jobs:
       - name: Permissions
         run: chmod +x *.sh
       - name: List directory
-        run : ls -lh
-      - name: Launching docker-compose
-        run: ./start.sh
-      - name: Running tests
-        run: ./exec.sh
+        run : ls -lh /tests_directory
+      # - name: Launching docker-compose
+        # run: ./start.sh
+      # - name: Running tests
+        # run: ./exec.sh
 
   release:
     needs: [flake8, tests-unit]
