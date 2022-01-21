@@ -14,3 +14,9 @@ class DialogsTest(unittest.TestCase):
     def test_culvert_manager_dialog(self):
         dlg = CulvertManager()
         dlg.show()
+
+# ############################################################################
+# ####### Stand-alone run ########
+# ################################
+if __name__ == "__main__":
+    unittest.main()
