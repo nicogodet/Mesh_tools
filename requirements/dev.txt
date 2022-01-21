@@ -4,4 +4,4 @@ flake8-absolute-import
 flake8-builtins
 flake8-print
 flake8-qgis
-isorts
+isort
