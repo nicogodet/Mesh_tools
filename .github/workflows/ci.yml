@@ -68,7 +68,7 @@ jobs:
       - name: Run Unit tests
         run: pytest tests/unit/
 
-  test-qgis:
+  tests-qgis:
     runs-on: ubuntu-20.04
 
     container:
