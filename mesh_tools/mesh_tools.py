@@ -68,8 +68,6 @@ class MeshTools:
         self.menu = self.tr("&Mesh Tools")
         # TODO: We are going to let the user set this up in a future iteration
         self.toolbar = QToolBar()
-        # self.toolbar = self.iface.addToolBar(u'MeshTools')
-        # self.toolbar.setObjectName(u'MeshTools')
 
         self.pluginIsActive = False
         self.dockwidget = None
