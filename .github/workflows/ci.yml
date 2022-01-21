@@ -68,6 +68,35 @@ jobs:
       - name: Run Unit tests
         run: pytest tests/unit/
 
+  test-qgis:
+    runs-on: ubuntu-20.04
+
+    container:
+      image: qgis/qgis:release-3_22
+      env:
+        DISPLAY: ":99"
+      options: -v ${{ github.workspace }}:/tests_directory
+
+    steps:
+      - name: Get source code
+        uses: actions/checkout@v2
+
+      - name: Print QGIS version
+        run: qgis --version
+
+      - uses: actions/cache@v2
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements/*.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install Python requirements
+        run: pip install -U -r requirements/testing.txt
+
+      - name: Run Unit tests
+        run: pytest tests/qgis/
+
   release:
     needs: [flake8, tests-unit]
 

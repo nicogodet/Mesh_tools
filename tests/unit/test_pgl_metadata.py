@@ -1,15 +1,5 @@
 # -*- coding: utf-8 -*-
 
-"""
-    Usage from the repo root folder:
-
-    .. code-block:: bash
-        # for whole tests
-        python -m unittest tests.unit.test_plg_metadata
-        # for specific test
-        python -m unittest tests.unit.test_plg_metadata.TestPluginMetadata.test_version_semver
-"""
-
 # standard library
 import unittest
 from pathlib import Path

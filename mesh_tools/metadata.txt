@@ -14,7 +14,7 @@ about=Tools for for management of Data using Mesh format :
       - Culvert Manager 
       - Sources Manager
       - Mesh Quality Analysis 
-     Developed by Aurélien Perrin(Artelia), Nicolas Godet (ISL), 
+     Developed by Aurélien Perrin (Artelia), Nicolas Godet (ISL), 
         and Christophe Coulet (BRGM)
 
 tracker=https://github.com/Artelia/mesh_tools/issues
