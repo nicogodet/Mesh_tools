@@ -46,27 +46,27 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Get source code
-      uses: actions/checkout@v2
+      - name: Get source code
+        uses: actions/checkout@v2
 
-    - name: Setup Python 3.9
+      - name: Setup Python 3.9
         uses: actions/setup-python@v2
         with:
           python-version: 3.9
           architecture: x64
 
-    - uses: actions/cache@v2
-      with:
-        path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('requirements/*.txt') }}
-        restore-keys: |
-          ${{ runner.os }}-pip-
+      - uses: actions/cache@v2
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements/*.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
 
-    - name: Install Python requirements
-      run: pip install -r requirements/stesting.txt
+      - name: Install Python requirements
+        run: pip install -r requirements/testing.txt
 
-    - name: Run Unit tests
-      run: pytest tests/unit/
+      - name: Run Unit tests
+        run: pytest tests/unit/
 
   release:
     needs: [flake8, tests-unit]
