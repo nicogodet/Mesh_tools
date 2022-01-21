@@ -69,33 +69,19 @@ jobs:
         run: pytest tests/unit/
 
   tests-qgis:
-    runs-on: ubuntu-20.04
-
-    container:
-      image: qgis/qgis:release-3_22
-      env:
-        DISPLAY: ":99"
-      options: -v ${{ github.workspace }}:/tests_directory
-
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .docker
     steps:
-      - name: Get source code
+      - name: Check out repository
         uses: actions/checkout@v2
-
-      - name: Print QGIS version
-        run: qgis --version
-
-      - uses: actions/cache@v2
         with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements/*.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-
-      - name: Install Python requirements
-        run: pip install -U -r requirements/testing.txt
-
-      - name: Run Unit tests
-        run: pytest tests/qgis/
+          submodules: 'true'
+      - name: Launching docker-compose
+        run: ./start.sh
+      - name: Running tests
+        run: ./exec.sh
 
   release:
     needs: [flake8, tests-unit]
