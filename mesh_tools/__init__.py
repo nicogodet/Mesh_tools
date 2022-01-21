@@ -34,4 +34,4 @@ def classFactory(iface):  # pylint: disable=invalid-name
 
     from .mesh_tools import MeshTools
 
-    return MeshTools(iface)
+    return MeshTools()
