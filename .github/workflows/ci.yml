@@ -80,6 +80,8 @@ jobs:
           submodules: 'true'
       - name: Permissions
         run: chmod +x *.sh
+      - name: List directory
+        run : ls -lh
       - name: Launching docker-compose
         run: ./start.sh
       - name: Running tests
