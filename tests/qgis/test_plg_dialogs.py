@@ -15,6 +15,14 @@ class DialogsTest(unittest.TestCase):
         dlg = CulvertManager()
         dlg.show()
 
+    def test_source_manager_dialog(self):
+        dlg = SourceManager()
+        dlg.show()
+
+    def test_meshquality_dialog(self):
+        dlg = MeshQuality()
+        dlg.show()
+
 # ############################################################################
 # ####### Stand-alone run ########
 # ################################
