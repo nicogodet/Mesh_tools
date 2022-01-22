@@ -22,6 +22,7 @@ class DialogsTest(unittest.TestCase):
         dlg = MeshQuality()
         dlg.show()
 
+
 # ############################################################################
 # ####### Stand-alone run ########
 # ################################

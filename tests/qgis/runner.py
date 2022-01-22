@@ -38,10 +38,13 @@ def _run_tests(test_suite, package_name, pattern):
     print("Expected failures    : {}".format(len(results.expectedFailures)))
     print("Unexpected successes : {}".format(len(results.unexpectedSuccesses)))
     print("Skip                 : {}".format(len(results.skipped)))
-    successes = (
-        results.testsRun - (
-            len(results.errors) + len(results.failures) + len(results.expectedFailures)
-            + len(results.unexpectedSuccesses) + len(results.skipped)))
+    successes = results.testsRun - (
+        len(results.errors)
+        + len(results.failures)
+        + len(results.expectedFailures)
+        + len(results.unexpectedSuccesses)
+        + len(results.skipped)
+    )
     print("Successes            : {}".format(successes))
     print("TOTAL                : {}".format(results.testsRun))
 
@@ -56,8 +59,8 @@ def test_package(package=None, pattern="test_*.py"):
     :param pattern: The pattern of files to discover.
     :type pattern: str
     """
-    pattern_environment = os.environ.get('TEST_PATTERN')
-    if pattern_environment and pattern_environment != 'default_pattern':
+    pattern_environment = os.environ.get("TEST_PATTERN")
+    if pattern_environment and pattern_environment != "default_pattern":
         print("Pattern from environment : {}".format(pattern_environment))
         pattern = pattern_environment
 

@@ -2,6 +2,7 @@
 
 # standard library
 import unittest
+
 from pathlib import Path
 
 # 3rd party
@@ -48,13 +49,9 @@ class TestPluginMetadata(unittest.TestCase):
         self.assertLessEqual(len(__about__.__title_clean__), len(__about__.__title__))
 
         # QGIS versions
-        self.assertIsInstance(
-            __about__.__plugin_md__.get("general").get("qgisminimumversion"), str
-        )
+        self.assertIsInstance(__about__.__plugin_md__.get("general").get("qgisminimumversion"), str)
 
-        self.assertIsInstance(
-            __about__.__plugin_md__.get("general").get("qgismaximumversion"), str
-        )
+        self.assertIsInstance(__about__.__plugin_md__.get("general").get("qgismaximumversion"), str)
 
         self.assertLessEqual(
             float(__about__.__plugin_md__.get("general").get("qgisminimumversion")),
