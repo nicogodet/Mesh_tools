@@ -32,169 +32,169 @@
 <context>
     <name>CulvertManager</name>
     <message>
-        <location filename="../libs/culvert_manager.py" line="273"/>
+        <location filename="../libs/culvert_manager.py" line="276"/>
         <source>Current mesh changed : {}</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/culvert_manager.py" line="285"/>
+        <location filename="../libs/culvert_manager.py" line="288"/>
         <source>Mesh CRS is not valid.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/culvert_manager.py" line="290"/>
+        <location filename="../libs/culvert_manager.py" line="293"/>
         <source>Creation of vertices spatial index...</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/culvert_manager.py" line="293"/>
+        <location filename="../libs/culvert_manager.py" line="296"/>
         <source>Vertices spatial index created in {} sec.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/culvert_manager.py" line="318"/>
+        <location filename="../libs/culvert_manager.py" line="321"/>
         <source>Current mesh dataset changed : {}</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/culvert_manager.py" line="333"/>
+        <location filename="../libs/culvert_manager.py" line="336"/>
         <source>Current mesh timestep changed : {}</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/culvert_manager.py" line="419"/>
+        <location filename="../libs/culvert_manager.py" line="422"/>
         <source>Automatic Z Update</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/culvert_manager.py" line="336"/>
+        <location filename="../libs/culvert_manager.py" line="339"/>
         <source>Mesh parameters have been changed.
 Update culvert features with Automatic Z checked ?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/culvert_manager.py" line="360"/>
+        <location filename="../libs/culvert_manager.py" line="363"/>
         <source>culvert</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/culvert_manager.py" line="415"/>
+        <location filename="../libs/culvert_manager.py" line="418"/>
         <source>Culvert layer CRS is not valid.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/culvert_manager.py" line="419"/>
+        <location filename="../libs/culvert_manager.py" line="422"/>
         <source>Culvert layer has been changed.
 Update culvert features with Automatic Z checked ?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/culvert_manager.py" line="448"/>
+        <location filename="../libs/culvert_manager.py" line="451"/>
         <source>No culvert selected</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/culvert_manager.py" line="450"/>
+        <location filename="../libs/culvert_manager.py" line="453"/>
         <source>More than one culvert selected</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/culvert_manager.py" line="454"/>
+        <location filename="../libs/culvert_manager.py" line="457"/>
         <source>Selected culvert informations</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/culvert_manager.py" line="458"/>
+        <location filename="../libs/culvert_manager.py" line="461"/>
         <source>No culvert layer selected</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/culvert_manager.py" line="633"/>
+        <location filename="../libs/culvert_manager.py" line="636"/>
         <source>Error on Z calculation : {}</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/culvert_manager.py" line="612"/>
+        <location filename="../libs/culvert_manager.py" line="615"/>
         <source>Error on N calculation : {}</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/culvert_manager.py" line="619"/>
+        <location filename="../libs/culvert_manager.py" line="622"/>
         <source>N values updated</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/culvert_manager.py" line="638"/>
+        <location filename="../libs/culvert_manager.py" line="641"/>
         <source>Z values updated</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/culvert_manager.py" line="654"/>
+        <location filename="../libs/culvert_manager.py" line="657"/>
         <source>All culverts are valid</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/culvert_manager.py" line="665"/>
+        <location filename="../libs/culvert_manager.py" line="668"/>
         <source>File creation is not possible, some culverts are not valid</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/culvert_manager.py" line="668"/>
+        <location filename="../libs/culvert_manager.py" line="671"/>
         <source>Culvert file</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/culvert_manager.py" line="668"/>
+        <location filename="../libs/culvert_manager.py" line="671"/>
         <source>Text File (*.txt)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/culvert_manager.py" line="682"/>
+        <location filename="../libs/culvert_manager.py" line="685"/>
         <source>Culvert count</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/culvert_manager.py" line="730"/>
+        <location filename="../libs/culvert_manager.py" line="733"/>
         <source>Culvert File Created</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/culvert_manager.py" line="876"/>
+        <location filename="../libs/culvert_manager.py" line="878"/>
         <source>Error during culvert file creation</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/culvert_manager.py" line="739"/>
+        <location filename="../libs/culvert_manager.py" line="742"/>
         <source>Nameless culvert (feature id {})</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/culvert_manager.py" line="744"/>
+        <location filename="../libs/culvert_manager.py" line="747"/>
         <source>Culvert extremity is not within the mesh.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/culvert_manager.py" line="756"/>
+        <location filename="../libs/culvert_manager.py" line="759"/>
         <source>{} value is not correct.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/culvert_manager.py" line="790"/>
+        <location filename="../libs/culvert_manager.py" line="792"/>
         <source>Import a mesh first.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/culvert_manager.py" line="819"/>
+        <location filename="../libs/culvert_manager.py" line="821"/>
         <source>Culverts</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/culvert_manager.py" line="850"/>
+        <location filename="../libs/culvert_manager.py" line="852"/>
         <source>Error when importing culvert {i} with error(s) : {err}</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/culvert_manager.py" line="898"/>
+        <location filename="../libs/culvert_manager.py" line="900"/>
         <source>Created culvert layer is not valid.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -718,32 +718,32 @@ A relaxation coefficient of 0.2 means that 20% of time T result is mixed with 80
 <context>
     <name>MeshTools</name>
     <message>
-        <location filename="../mesh_tools.py" line="68"/>
+        <location filename="../mesh_tools.py" line="69"/>
         <source>&amp;Mesh Tools</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../mesh_tools.py" line="229"/>
+        <location filename="../mesh_tools.py" line="228"/>
         <source>Culvert Manager</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../mesh_tools.py" line="235"/>
+        <location filename="../mesh_tools.py" line="234"/>
         <source>Source Manager</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../mesh_tools.py" line="182"/>
+        <location filename="../mesh_tools.py" line="181"/>
         <source>Mesh Quality Analysis</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../mesh_tools.py" line="232"/>
+        <location filename="../mesh_tools.py" line="231"/>
         <source>Telemac - Mesh Quality Analysis</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../mesh_tools.py" line="238"/>
+        <location filename="../mesh_tools.py" line="237"/>
         <source>MeshTool - Error</source>
         <translation type="unfinished"></translation>
     </message>
@@ -764,114 +764,114 @@ A relaxation coefficient of 0.2 means that 20% of time T result is mixed with 80
 <context>
     <name>SourceManager</name>
     <message>
-        <location filename="../libs/source_manager.py" line="83"/>
+        <location filename="../libs/source_manager.py" line="84"/>
         <source>Name</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/source_manager.py" line="84"/>
+        <location filename="../libs/source_manager.py" line="85"/>
         <source>Note</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/source_manager.py" line="190"/>
+        <location filename="../libs/source_manager.py" line="191"/>
         <source>Current mesh changed : {}</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/source_manager.py" line="202"/>
+        <location filename="../libs/source_manager.py" line="203"/>
         <source>Mesh CRS is not valid.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/source_manager.py" line="207"/>
+        <location filename="../libs/source_manager.py" line="208"/>
         <source>Creation of vertices spatial index...</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/source_manager.py" line="210"/>
+        <location filename="../libs/source_manager.py" line="211"/>
         <source>Vertices spatial index created in {} sec.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/source_manager.py" line="223"/>
+        <location filename="../libs/source_manager.py" line="224"/>
         <source>source</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/source_manager.py" line="308"/>
+        <location filename="../libs/source_manager.py" line="309"/>
         <source>Source layer CRS is not valid.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/source_manager.py" line="328"/>
+        <location filename="../libs/source_manager.py" line="329"/>
         <source>No source selected</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/source_manager.py" line="330"/>
+        <location filename="../libs/source_manager.py" line="331"/>
         <source>More than one source selected</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/source_manager.py" line="334"/>
+        <location filename="../libs/source_manager.py" line="335"/>
         <source>Selected source informations</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/source_manager.py" line="338"/>
+        <location filename="../libs/source_manager.py" line="339"/>
         <source>No source layer selected</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/source_manager.py" line="451"/>
+        <location filename="../libs/source_manager.py" line="452"/>
         <source>Copy the text below in your CAS file.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/source_manager.py" line="478"/>
+        <location filename="../libs/source_manager.py" line="479"/>
         <source>MAXIMUM NUMBER OF SOURCES = {}
 </source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/source_manager.py" line="432"/>
+        <location filename="../libs/source_manager.py" line="433"/>
         <source>ABSCISSAE OF SOURCES</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/source_manager.py" line="434"/>
+        <location filename="../libs/source_manager.py" line="435"/>
         <source>ORDINATES OF SOURCES</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/source_manager.py" line="443"/>
+        <location filename="../libs/source_manager.py" line="444"/>
         <source>Region source file</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/source_manager.py" line="443"/>
+        <location filename="../libs/source_manager.py" line="444"/>
         <source>Text File (*.txt)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/source_manager.py" line="452"/>
+        <location filename="../libs/source_manager.py" line="453"/>
         <source>SOURCE REGIONS DATA FILE = &apos;{}&apos;
 </source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/source_manager.py" line="463"/>
+        <location filename="../libs/source_manager.py" line="464"/>
         <source>SOURCE REGION {}</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/source_manager.py" line="464"/>
+        <location filename="../libs/source_manager.py" line="465"/>
         <source># COORDINATES AT</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/source_manager.py" line="480"/>
+        <location filename="../libs/source_manager.py" line="481"/>
         <source>MAXIMUM NUMBER OF POINTS FOR SOURCES REGIONS = {}
 </source>
         <translation type="unfinished"></translation>
@@ -948,7 +948,7 @@ A relaxation coefficient of 0.2 means that 20% of time T result is mixed with 80
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/create_shp_dlg.py" line="87"/>
+        <location filename="../libs/create_shp_dlg.py" line="92"/>
         <source>Error</source>
         <translation type="unfinished"></translation>
     </message>
@@ -958,7 +958,7 @@ A relaxation coefficient of 0.2 means that 20% of time T result is mixed with 80
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../libs/create_shp_dlg.py" line="87"/>
+        <location filename="../libs/create_shp_dlg.py" line="92"/>
         <source>Select a projection.</source>
         <translation type="unfinished"></translation>
     </message>
