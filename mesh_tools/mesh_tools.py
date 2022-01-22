@@ -57,6 +57,8 @@ class MeshTools:
 
         # initialize locale
         locale = QSettings().value("locale/userLocale")[0:2]
+        if locale == "fr":
+            locale = "fr_FR"
         locale_path = os.path.join(self.plugin_dir, "i18n", "MeshTools_{}.qm".format(locale))
 
         if os.path.exists(locale_path):
