@@ -285,5 +285,22 @@ class TestImport(CulvertManagerTestCase):
         self.assertEqual(reopened.crs().authid(), "EPSG:3857")
 
 
+class TestImportDialog(CulvertManagerTestCase):
+    def test_space_separated_official_file_is_mapped(self):
+        from mesh_tools.libs.import_culvert_file_dlg import dlg_import_culvert_file
+
+        dlg = dlg_import_culvert_file([f[0] for f in self.dock.culv_flds], QgsCoordinateReferenceSystem(CRS), self.dock)
+        dlg.text_file.setFilePath(SIPHON)
+        dlg.parseTextFile()
+        self.assertEqual(dlg.items["n1"][1], "I1")
+        self.assertEqual(dlg.items["larg"][1], "LRG")
+        self.assertEqual(dlg.items["l12"][1], "LBUS")
+        self.assertEqual(dlg.items["d1"][1], "D1")
+        # a file without any known column resets the mapping
+        dlg.text_file.setFilePath("")
+        dlg.parseTextFile()
+        self.assertEqual(dlg.items["n1"][1], "")
+
+
 if __name__ == "__main__":
     unittest.main()
