@@ -30,6 +30,8 @@ from qgis.PyQt import uic
 from qgis.PyQt.QtCore import QCoreApplication
 from qgis.PyQt.QtWidgets import QComboBox, QDialog, QTableWidgetItem
 
+from .culvert_io import field_for_header, read_header
+
 FORM_CLASS, _ = uic.loadUiType(
     os.path.join(os.path.dirname(__file__), "..", "ui", "import_culvert_file.ui")
 )
@@ -108,35 +110,25 @@ class dlg_import_culvert_file(QDialog, FORM_CLASS):
             self.items[param.lower()][1] = txt_param
 
     def parseTextFile(self):
-        def get_values(string):
-            values = string.strip().split("\t")
-            if isinstance(values, str):
-                values.split(" ")
-            return values
-
         path = self.text_file.filePath()
 
-        if not path:
-            for value in self.items.values():
-                value[1] = ""
-            self.updateTable()
-            return
+        # Forget the mapping of the previous file
+        for key in [k for k, v in self.items.items() if not v[0]]:
+            del self.items[key]
+        for value in self.items.values():
+            value[1] = ""
 
-        with open(path, "r") as txt_file:
-            # First line is always a comment
-            txt_file.readline()
-            txt_file.readline()
-            headers = get_values(txt_file.readline())
+        headers = []
+        if path:
+            try:
+                headers = read_header(path)
+            except OSError:
+                pass
 
         for header in headers:
-            key = None
-            if header.lower() in self.items.keys():
-                key = header.lower()
-            elif header.lower() in ["i1", "i2"]:
-                key = f"n{header.lower()[1]}"
-
-            if key is not None:
-                self.items[key][1] = header
+            name = field_for_header(header)
+            if name is not None:
+                self.items[name.lower()][1] = header
             else:
                 self.items[header.lower()] = ["", header]
 

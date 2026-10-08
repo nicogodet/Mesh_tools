@@ -57,7 +57,8 @@ class MeshUtils:
 
         x_point = xform.transform(point)
 
-        if not MeshUtils.pointInMesh(mesh, point):
+        # snapOnElement expects map coordinates (CRS of the transformed point)
+        if not MeshUtils.pointInMesh(mesh, x_point):
             error = MeshUtils.tr("The point is not within the mesh.")
             return vertexIndex, error
 
@@ -84,16 +85,24 @@ class MeshUtils:
         error = None
         n = [None, None]
 
-        points = feat.geometry().asMultiPolyline()
-        for p in (0, -1):
-            point = points[p][p]
+        vertices = MeshUtils.lineVertices(feat.geometry())
+        if len(vertices) < 2:
+            return n, MeshUtils.tr("The culvert geometry is not valid.")
 
-            n[p], err = MeshUtils.findNearestVertex(mesh, vertexSpatialIndex, point, xform)
+        for p in (0, -1):
+            n[p], err = MeshUtils.findNearestVertex(mesh, vertexSpatialIndex, vertices[p], xform)
 
             if err is not None:
                 error = err
 
         return n, error
+
+    @staticmethod
+    def lineVertices(geometry: QgsGeometry) -> list:
+        """Vertices of a LineString or MultiLineString, in order."""
+        if geometry is None or geometry.isNull():
+            return []
+        return [QgsPointXY(vertex) for vertex in geometry.vertices()]
 
     @staticmethod
     def zFromN(mesh: QgsMeshLayer, meshDatasetIndex: QgsMeshDatasetIndex, n: int):
@@ -108,6 +117,10 @@ class MeshUtils:
 
         if n < 1:
             error = MeshUtils.tr("N should a strict positive integer.")
+            return point, error
+
+        if n > nativeMesh.vertexCount():
+            error = MeshUtils.tr("N is greater than the number of mesh vertices.")
             return point, error
 
         point = QgsPointXY(nativeMesh.vertex(n - 1))
@@ -126,7 +139,7 @@ class MeshUtils:
 
         count = nativeMesh.vertexCount()
         offset = 0
-        batch_size = 10
+        batch_size = 10000
         while offset < count:
             lst_ft = list()
             iterations = min(batch_size, count - offset)

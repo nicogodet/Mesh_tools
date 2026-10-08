@@ -23,17 +23,17 @@
  ***************************************************************************/
 """
 
+import math
 import os
 import time
 
 from contextlib import suppress
 
-import numpy as np
-
 from processing.algs.gdal.GdalUtils import GdalUtils
 from qgis.core import (
     NULL,
     Qgis,
+    QgsCsException,
     QgsCoordinateTransform,
     QgsCoordinateTransformContext,
     QgsFeature,
@@ -42,7 +42,6 @@ from qgis.core import (
     QgsGeometry,
     QgsMesh,
     QgsMeshDatasetIndex,
-    QgsPointXY,
     QgsVectorFileWriter,
     QgsVectorLayer,
 )
@@ -61,12 +60,28 @@ from qgis.PyQt.QtWidgets import (
 
 from ..mesh_tools_dockwidget import MeshToolsDockWidget
 from .create_shp_dlg import dlg_create_shapefile
+from .culvert_fields import FIELD_NAMES, FIELDS, KIND_FLOAT, KIND_INT, KIND_INT_TEXT, KIND_STR
+from .culvert_io import (
+    CulvertFileError,
+    is_null,
+    parse_value,
+    read_culvert_file,
+    validate_record,
+    write_culvert_file,
+)
 from .import_culvert_file_dlg import dlg_import_culvert_file
 from .MeshUtils import MeshUtils
 
 FORM_CLASS, _ = uic.loadUiType(
     os.path.join(os.path.dirname(__file__), "..", "ui", "culvert_manager.ui")
 )
+
+QT_TYPES = {
+    KIND_STR: QMetaType.Type.QString,
+    KIND_INT_TEXT: QMetaType.Type.QString,
+    KIND_FLOAT: QMetaType.Type.Double,
+    KIND_INT: QMetaType.Type.Int,
+}
 
 
 class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
@@ -96,42 +111,12 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
 
         self.software_select = 0
 
-        # fmt: off
         # Col4 - Index for Telemac
         # Col5 - Index for Uhaina
         self.culv_flds = [
-            ["NAME",        QMetaType.Type.QString,  self.txt_name,  28, 23  ],
-            ["N1",          QMetaType.Type.Int,      None,           0,  None],
-            ["N2",          QMetaType.Type.Int,      None,           1,  None],
-            ["CE1",         QMetaType.Type.Double,   self.sb_ce1,    2, 6    ],
-            ["CE2",         QMetaType.Type.Double,   self.sb_ce2,    3, 7    ],
-            ["CS1",         QMetaType.Type.Double,   self.sb_cs1,    4, 8    ],
-            ["CS2",         QMetaType.Type.Double,   self.sb_cs2,    5, 9    ],
-            ["LARG",        QMetaType.Type.Double,   self.sb_larg,   6, 17   ],
-            ["HAUT",        QMetaType.Type.Double,   self.sb_haut1,  7, 18   ],
-            ["CLAP",        QMetaType.Type.QString,  self.cb_clapet, 8, 20   ],
-            ["L12",         QMetaType.Type.Double,   self.sb_l12,    9, 10   ],
-            ["Z1",          QMetaType.Type.Double,   self.sb_z1,     10, 2   ],
-            ["Z2",          QMetaType.Type.Double,   self.sb_z2,     11, 5   ],
-            ["CV",          QMetaType.Type.Double,   self.sb_cv,     12, None],
-            ["C56",         QMetaType.Type.Double,   self.sb_c56,    13, None],
-            ["CV5",         QMetaType.Type.Double,   self.sb_cv5,    14, None],
-            ["C5",          QMetaType.Type.Double,   self.sb_c5,     15, None],
-            ["CT",          QMetaType.Type.Double,   self.sb_ct,     16, None],
-            ["HAUT2",       QMetaType.Type.Double,   self.sb_haut2,  17, 19  ],
-            ["FRIC",        QMetaType.Type.Double,   self.sb_fric,   18, None],
-            ["LENGTH",      QMetaType.Type.Double,   self.sb_length, 19, None],
-            ["CIRC",        QMetaType.Type.Int,      self.cb_circ,   20, 16  ],
-            ["d1",          QMetaType.Type.Double,   self.sb_d1,     21, 11  ],
-            ["d2",          QMetaType.Type.Double,   self.sb_d2,     22, 12  ],
-            ["a1",          QMetaType.Type.Double,   self.sb_a1,     23, 14  ],
-            ["a2",          QMetaType.Type.Double,   self.sb_a2,     24, 15  ],
-            ["AA",          QMetaType.Type.Int,      self.cb_auto_a, 25, 13  ],
-            ["NB_in_//",    QMetaType.Type.Int,      self.sb_nbre,   None, 21  ],
-            ["AL",          QMetaType.Type.Int,      self.cb_auto_l, 26, None],
-            ["AZ",          QMetaType.Type.Int,      self.cb_auto_z, 27, 22  ]
+            [f.name, QT_TYPES[f.kind], getattr(self, f.widget) if f.widget else None, f.telemac_col, f.uhaina_col]
+            for f in FIELDS
         ]
-        # fmt: on
 
         self.is_opening = True
 
@@ -152,6 +137,7 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
 
         self.cb_lay_mesh.setFilters(Qgis.LayerFilter.MeshLayer)
         self.cb_lay_mesh.layerChanged.connect(self.mesh_lay_changed)
+        self.cb_lay_mesh.currentIndexChanged.connect(self.mesh_lay_changed)
         self.cb_lay_culv.currentIndexChanged.connect(self.culv_lay_changed)
         self.cb_dataset_mesh.currentIndexChanged.connect(self.mesh_dataset_changed)
         self.cb_time_mesh.currentIndexChanged.connect(self.mesh_time_changed)
@@ -179,7 +165,7 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
         for lay in self.project.mapLayers().values():
             self.analyse_layer(lay)
 
-        self.mesh_lay_changed()
+        self.set_mesh_layer(self.cb_lay_mesh.currentLayer())
 
         if self.mdl_lay_culv.rowCount() == 0:
             self.culv_lay_changed()
@@ -196,9 +182,9 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
                 self.mdl_lay_culv.takeRow(r)
 
     def analyse_layer(self, lay):
-        if lay.type() == Qgis.LayerType.Vector:
-            flds = [f.name() for f in lay.fields()]
-            if all(elem in flds for elem in [fc[0] for fc in self.culv_flds]):
+        if lay.type() == Qgis.LayerType.Vector and lay.geometryType() == Qgis.GeometryType.Line:
+            flds = {f.name().lower() for f in lay.fields()}
+            if all(name.lower() in flds for name in FIELD_NAMES):
                 itm = QStandardItem()
                 itm.setData(lay.name(), 0)
                 itm.setData(lay.id(), 32)
@@ -221,16 +207,41 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
         self.cur_culv_changed()
 
     def clean(self):
-        self.project.layersAdded.disconnect(self.addLayers)
-        self.project.layersRemoved.disconnect(self.removeLayers)
+        with suppress(RuntimeError, TypeError):
+            self.project.layersAdded.disconnect(self.addLayers)
+        with suppress(RuntimeError, TypeError):
+            self.project.layersRemoved.disconnect(self.removeLayers)
 
-        self.lay_mesh.crsChanged.disconnect(self.cur_mesh_changed)
-        self.lay_culv.crsChanged.disconnect(self.culv_lay_changed)
+        self.disconnect_mesh_layer()
+        self.disconnect_culv_layer()
 
-        self.cb_lay_mesh.layerChanged.disconnect(self.mesh_lay_changed)
-        self.cb_lay_culv.currentIndexChanged.disconnect(self.culv_lay_changed)
-        self.cb_dataset_mesh.currentIndexChanged.disconnect(self.mesh_dataset_changed)
-        self.cb_time_mesh.currentIndexChanged.disconnect(self.mesh_time_changed)
+        with suppress(RuntimeError, TypeError):
+            self.cb_lay_mesh.layerChanged.disconnect(self.mesh_lay_changed)
+        with suppress(RuntimeError, TypeError):
+            self.cb_lay_mesh.currentIndexChanged.disconnect(self.mesh_lay_changed)
+        with suppress(RuntimeError, TypeError):
+            self.cb_lay_culv.currentIndexChanged.disconnect(self.culv_lay_changed)
+        with suppress(RuntimeError, TypeError):
+            self.cb_dataset_mesh.currentIndexChanged.disconnect(self.mesh_dataset_changed)
+        with suppress(RuntimeError, TypeError):
+            self.cb_time_mesh.currentIndexChanged.disconnect(self.mesh_time_changed)
+
+    def disconnect_mesh_layer(self):
+        """Disconnect only our own slots: a bare disconnect() would also remove QGIS internal connections."""
+        if self.lay_mesh is not None:
+            with suppress(RuntimeError, TypeError):
+                self.lay_mesh.crsChanged.disconnect(self.cur_mesh_changed)
+
+    def disconnect_culv_layer(self):
+        if self.lay_culv is not None:
+            for signal, slot in (
+                (self.lay_culv.selectionChanged, self.cur_culv_changed),
+                (self.lay_culv.editingStarted, self.cur_culv_changed),
+                (self.lay_culv.editingStopped, self.cur_culv_changed),
+                (self.lay_culv.crsChanged, self.culv_lay_changed),
+            ):
+                with suppress(RuntimeError, TypeError):
+                    signal.disconnect(slot)
 
     ######################################################################################
     #                                                                                    #
@@ -251,19 +262,27 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
     #                                                                                    #
     ######################################################################################
 
-    def mesh_lay_changed(self):
-        with suppress(AttributeError, RuntimeError, TypeError):
-            self.lay_mesh.crsChanged.disconnect()
+    def mesh_lay_changed(self, *_):
+        # QGIS 4 emits layerChanged(None) before the combo box is updated: the layer is read from the combo box,
+        # and currentIndexChanged is also connected to catch the update
+        layer = self.cb_lay_mesh.currentLayer()
+        if layer is not self.lay_mesh:
+            self.set_mesh_layer(layer)
 
-        self.lay_mesh = self.cb_lay_mesh.currentLayer()
+    def set_mesh_layer(self, layer):
+        self.disconnect_mesh_layer()
+
+        self.lay_mesh = layer
 
         if self.lay_mesh:
+            self.lay_mesh.crsChanged.connect(self.cur_mesh_changed)
             self.cb_dataset_mesh.setEnabled(True)
             self.cb_time_mesh.setEnabled(True)
         else:
             self.lay_mesh = None
             self.native_mesh = None
             self.vertices = None
+            self.lay_mesh_xform = None
             self.cb_dataset_mesh.setEnabled(False)
             self.cb_time_mesh.setEnabled(False)
         self.cur_mesh_changed()
@@ -278,11 +297,12 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
         self.native_mesh = QgsMesh()
         self.lay_mesh.dataProvider().populateMesh(self.native_mesh)
 
-        self.lay_mesh.crsChanged.connect(self.cur_mesh_changed)
         if self.lay_mesh.crs().isValid():
             self.lay_mesh_xform = QgsCoordinateTransform(
                 self.lay_mesh.crs(), self.canvas.mapSettings().destinationCrs(), self.project
             )
+            # Mesh snapping works on the triangular mesh, which is otherwise only built when the layer is rendered
+            self.lay_mesh.updateTriangularMesh(self.lay_mesh_xform)
         else:
             self.lay_mesh_xform = None
             self.valid_mesh_culv()
@@ -320,7 +340,7 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
     def mesh_dataset_changed(self):
         self.mdl_mesh_time.clear()
         self.cur_mesh_dataset = self.cb_dataset_mesh.currentData(32)
-        if self.cur_mesh_dataset is not None:
+        if self.lay_mesh is not None and self.cur_mesh_dataset is not None:
             self.writeInfo(
                 self.tr("Current mesh dataset changed : {}").format(
                     self.cb_dataset_mesh.currentText()
@@ -335,10 +355,6 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
                 )
                 itm.setData(i, 32)
                 self.mdl_mesh_time.appendRow(itm)
-
-        tmpSettings = self.lay_mesh.rendererSettings()
-        tmpSettings.setActiveScalarDatasetGroup(self.cur_mesh_dataset)
-        self.lay_mesh.setRendererSettings(tmpSettings)
 
     def mesh_time_changed(self):
         self.cur_mesh_time = self.cb_time_mesh.currentData(32)
@@ -397,12 +413,15 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
         options = QgsVectorFileWriter.SaveVectorOptions()
         options.driverName = layerDriver
         options.fileEncoding = "utf-8"
-        QgsVectorFileWriter.writeAsVectorFormatV2(
+        result = QgsVectorFileWriter.writeAsVectorFormatV2(
             layer=tmp_lay,
             fileName=path,
             transformContext=QgsCoordinateTransformContext(),
             options=options,
         )
+        if result[0] != Qgis.VectorExportResult.Success:
+            self.writeError(self.tr("Error during culvert file creation : {}").format(result[1]))
+            return
 
         shp_lay = QgsVectorLayer(path, os.path.basename(path).rsplit(".", 1)[0], "ogr")
         shp_lay.setCrs(crs)
@@ -411,9 +430,8 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
         self.project.addMapLayer(shp_lay)
         self.cb_lay_culv.setCurrentIndex(self.cb_lay_culv.findData(shp_lay.id(), 32))
 
-    def culv_lay_changed(self):
-        with suppress(AttributeError, RuntimeError, TypeError):
-            self.lay_culv.crsChanged.disconnect()
+    def culv_lay_changed(self, *_):
+        self.disconnect_culv_layer()
 
         lay_id = self.cb_lay_culv.currentData(32)
         self.cur_culv_id = None
@@ -432,7 +450,8 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
                 self.lay_culv_xform = None
                 self.writeWarning(self.tr("Culvert layer CRS is not valid."))
 
-            if self.lay_mesh is not None and self.is_opening is False:
+            # Nothing to update in a new empty layer
+            if self.lay_mesh is not None and self.is_opening is False and self.lay_culv.featureCount() > 0:
                 self.update_all_n()
                 if (
                     QMessageBox.question(
@@ -507,12 +526,12 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
 
     def display_info(self, ctrl, val):
         if isinstance(ctrl, QDoubleSpinBox):
-            if val is None:
+            if is_null(val):
                 ctrl.setValue(0.0)
             else:
                 ctrl.setValue(val)
         elif isinstance(ctrl, QSpinBox):
-            if val is None:
+            if is_null(val):
                 ctrl.setValue(1)
             else:
                 ctrl.setValue(val)
@@ -523,12 +542,25 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
             else:
                 ctrl.setCurrentIndex(idx)
         elif isinstance(ctrl, QCheckBox):
-            if val == 1:
+            if not is_null(val) and val == 1:
                 ctrl.setCheckState(Qt.CheckState.Checked)
             else:
                 ctrl.setCheckState(Qt.CheckState.Unchecked)
         elif isinstance(ctrl, QLineEdit):
-            ctrl.setText(str(val))
+            ctrl.setText("" if is_null(val) else str(val))
+
+    def write_attributes(self, attrs):
+        """Write {feature id: {field index: value}} without ever committing the user's own edits."""
+        if self.lay_culv.isEditable():
+            for fid, values in attrs.items():
+                for idx, value in values.items():
+                    self.lay_culv.changeAttributeValue(fid, idx, value)
+        else:
+            self.lay_culv.dataProvider().changeAttributeValues(attrs)
+            self.lay_culv.triggerRepaint()
+
+    def field_index(self, name):
+        return self.lay_culv.fields().lookupField(name)
 
     def ctrl_edited(self):
         ft = None
@@ -553,18 +585,20 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
                 for idx in range(len(self.culv_flds)):
                     if ctrl == self.culv_flds[idx][2]:
                         field_name = self.culv_flds[idx][0]
-                        field_idx = self.lay_culv.fields().indexFromName(field_name)
+                        field_idx = self.field_index(field_name)
                         break
 
                 if field_idx is not None:
-                    attrs = {field_idx: val}
-                    self.lay_culv.dataProvider().changeAttributeValues({self.cur_culv_id: attrs})
-                    self.lay_culv.commitChanges()
+                    self.write_attributes({self.cur_culv_id: {field_idx: val}})
 
         if self.sender() == self.cb_auto_z:
             self.sb_z1.setEnabled(not self.cb_auto_z.isChecked())
             self.sb_z2.setEnabled(not self.cb_auto_z.isChecked())
             if ft:
+                if not self.mesh_ready():
+                    self.writeError(self.tr("Error on Z calculation : {}").format(self.tr("No valid mesh dataset.")))
+                    return
+
                 (n1, n2), err = MeshUtils.n1n2FromFeature(
                     self.lay_mesh, self.vertices, ft, self.lay_culv_xform
                 )
@@ -573,27 +607,16 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
                     self.writeError(self.tr("Error on Z calculation : {}").format(err))
                     return
 
-                attrs = {
-                    self.cur_culv_id: {ft.fieldNameIndex("N1"): n1, ft.fieldNameIndex("N2"): n2}
-                }
+                attrs = {self.cur_culv_id: {self.field_index("N1"): n1, self.field_index("N2"): n2}}
 
                 if self.cb_auto_z.isChecked():
-                    z1 = MeshUtils.zFromN(
-                        self.lay_mesh,
-                        QgsMeshDatasetIndex(self.cur_mesh_dataset, self.cur_mesh_time),
-                        n1,
-                    )
-                    z2 = MeshUtils.zFromN(
-                        self.lay_mesh,
-                        QgsMeshDatasetIndex(self.cur_mesh_dataset, self.cur_mesh_time),
-                        n2,
-                    )
+                    z1 = MeshUtils.zFromN(self.lay_mesh, self.mesh_dataset_index(), n1)
+                    z2 = MeshUtils.zFromN(self.lay_mesh, self.mesh_dataset_index(), n2)
 
                     self.sb_z1.setValue(z1)
                     self.sb_z2.setValue(z2)
 
-                self.lay_culv.dataProvider().changeAttributeValues(attrs)
-                self.lay_culv.commitChanges()
+                self.write_attributes(attrs)
 
         if self.sender() == self.cb_auto_a:
             self.sb_a1.setEnabled(not self.cb_auto_a.isChecked())
@@ -635,7 +658,22 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
                 elif isinstance(ctrl, QCheckBox):
                     ctrl.setCheckState(Qt.CheckState.Unchecked)
 
+    def mesh_dataset_index(self):
+        return QgsMeshDatasetIndex(self.cur_mesh_dataset, self.cur_mesh_time)
+
+    def mesh_ready(self):
+        """True if the node lookup and the dataset used for Z are available."""
+        return (
+            self.lay_mesh is not None
+            and self.vertices is not None
+            and self.cur_mesh_dataset is not None
+            and self.cur_mesh_time is not None
+        )
+
     def update_all_n(self, log=True):
+        if self.lay_mesh is None or self.vertices is None:
+            return
+
         attrs = dict()
         success = True
         for ft in self.lay_culv.getFeatures():
@@ -650,15 +688,19 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
                 if log:
                     self.writeError(self.tr("Error on N calculation : {}").format(err))
 
-            attrs[ft.id()] = {ft.fieldNameIndex("N1"): n1, ft.fieldNameIndex("N2"): n2}
+            attrs[ft.id()] = {self.field_index("N1"): n1, self.field_index("N2"): n2}
 
-        self.lay_culv.dataProvider().changeAttributeValues(attrs)
-        self.lay_culv.commitChanges()
+        self.write_attributes(attrs)
         if log and success:
             self.writeSuccess(self.tr("N values updated"))
 
     def update_all_auto_z(self):
+        if not self.mesh_ready():
+            self.writeError(self.tr("Error on Z calculation : {}").format(self.tr("No valid mesh dataset.")))
+            return
+
         attrs = dict()
+        success = True
         for ft in self.lay_culv.getFeatures():
             if ft["AZ"] != 1:
                 continue
@@ -667,24 +709,16 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
                 self.lay_mesh, self.vertices, ft, self.lay_culv_xform
             )
             if err is None:
-                z1 = MeshUtils.zFromN(
-                    self.lay_mesh,
-                    QgsMeshDatasetIndex(self.cur_mesh_dataset, self.cur_mesh_time),
-                    n1,
-                )
-                z2 = MeshUtils.zFromN(
-                    self.lay_mesh,
-                    QgsMeshDatasetIndex(self.cur_mesh_dataset, self.cur_mesh_time),
-                    n2,
-                )
-                attrs[ft.id()] = {ft.fieldNameIndex("Z1"): z1, ft.fieldNameIndex("Z2"): z2}
+                z1 = MeshUtils.zFromN(self.lay_mesh, self.mesh_dataset_index(), n1)
+                z2 = MeshUtils.zFromN(self.lay_mesh, self.mesh_dataset_index(), n2)
+                attrs[ft.id()] = {self.field_index("Z1"): z1, self.field_index("Z2"): z2}
             else:
+                success = False
                 self.writeError(self.tr("Error on Z calculation : {}").format(err))
-                return
 
-        self.lay_culv.dataProvider().changeAttributeValues(attrs)
-        self.lay_culv.commitChanges()
-        self.writeSuccess(self.tr("Z values updated"))
+        self.write_attributes(attrs)
+        if success:
+            self.writeSuccess(self.tr("Z values updated"))
         self.display_culv_info()
 
     ######################################################################################
@@ -705,6 +739,14 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
             for invalidId in invalidIds:
                 self.writeError("{} : {}".format(*invalidId))
 
+    def record_from_feature(self, ft):
+        """Feature attributes as a dict for culvert_io, NULL being None."""
+        record = {}
+        for fld in self.culv_flds:
+            value = ft[fld[0]]
+            record[fld[0]] = None if is_null(value) or value == NULL else value
+        return record
+
     def create_file(self):
         if not self.lay_culv:
             return
@@ -721,100 +763,56 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
         if not culv_file_name:
             return
 
-        nb_culv = self.lay_culv.featureCount()
-        relax = round(self.sb_relax.value(), 2)
+        relax = self.sb_relax.value()
 
-        with open(culv_file_name, "w", encoding="utf-8") as culv_file:
-            if self.software_select == 0:  # Telemac
-                culv_file.write("Relaxation" + str("\t") + self.tr("Culvert count") + str("\n"))
-                culv_file.write(str(relax) + str("\t") + str(nb_culv) + str("\n"))
-                idx_out = 3
-            elif self.software_select == 1:  # Uhaina
-                culv_file.write(self.tr("Culvert count") + str("\n"))
-                culv_file.write(str(nb_culv) + str("\n"))
-                idx_out = 4
+        # Uhaina needs the culvert extremities in the mesh CRS
+        culv_to_mesh = None
+        if self.software_select == 1:
+            culv_to_mesh = QgsCoordinateTransform(self.lay_culv.crs(), self.lay_mesh.crs(), self.project)
 
-            culv_flds_srtd = [
-                fld
-                for fld in sorted(self.culv_flds, key=lambda x: (x[idx_out] is None, x[idx_out]))
-                if fld[idx_out] is not None
-            ]
-
-            txt = ""
-            for fld in culv_flds_srtd[:-1]:
-                if (self.software_select == 1) and (fld[0] in ["Z1", "Z2"]):  # Uhaina Only
-                    txt += f"X{fld[0][1]}\t"
-                    txt += f"Y{fld[0][1]}\t"
-
-                txt += f"{fld[0]}\t"
-            txt += f"{culv_flds_srtd[-1][0]}\n"
-            culv_file.write(txt)
-
-            for ft in self.lay_culv.getFeatures():
-                txt = ""
-                if self.software_select == 1:  # Uhaina Only
-                    pts = ft.geometry().asMultiPolyline()
-                    pt1 = QgsPointXY(pts[0][0])
-                    pt2 = QgsPointXY(pts[-1][-1])
-
-                    # pt1 and pt2 need to be transformed into mesh CRS
-                    pt1 = self.lay_mesh_xform.transform(
-                        self.lay_culv_xform.transform(pt1, Qgis.TransformDirection.Reverse),
-                        Qgis.TransformDirection.Reverse,
+        records = []
+        for ft in self.lay_culv.getFeatures():
+            record = self.record_from_feature(ft)
+            if culv_to_mesh is not None:
+                vertices = MeshUtils.lineVertices(ft.geometry())
+                try:
+                    pt1 = culv_to_mesh.transform(vertices[0])
+                    pt2 = culv_to_mesh.transform(vertices[-1])
+                except (QgsCsException, IndexError):
+                    self.writeError(
+                        self.tr("Coordinates of culvert {} cannot be converted to the mesh CRS.").format(
+                            record["NAME"] or ft.id()
+                        )
                     )
-                    pt2 = self.lay_mesh_xform.transform(
-                        self.lay_culv_xform.transform(pt2, Qgis.TransformDirection.Reverse),
-                        Qgis.TransformDirection.Reverse,
-                    )
+                    return
+                record["_xy"] = (pt1.x(), pt1.y(), pt2.x(), pt2.y())
+            records.append(record)
 
-                for fld in culv_flds_srtd[:-1]:
-                    if (self.software_select == 1) and (fld[0] in ["Z1", "Z2"]):
-                        if fld[0] == "Z1":
-                            txt += f"{pt1.x()}\t{pt1.y()}\t"
-                        elif fld[0] == "Z2":
-                            txt += f"{pt2.x()}\t{pt2.y()}\t"
-                    elif (fld[0] == "HAUT2") and (ft[fld[0]] == 0):
-                        # In case HAUT2 is empty, suppose it is equal to HAUT
-                        #
-                        txt += f"{ft['HAUT']}\t"
-
-                    txt += f"{ft[fld[0]]}\t"
-                txt += f"{ft[culv_flds_srtd[-1][0]]}\n"
-                culv_file.write(txt.replace("NULL", " "))
-
-            self.writeSuccess(self.tr("Culvert File Created"))
+        try:
+            write_culvert_file(culv_file_name, records, self.software_select, relax)
+        except (CulvertFileError, OSError) as err:
+            self.writeError(self.tr("Error during culvert file creation : {}").format(err))
             return
 
-        self.writeError(self.tr("Error during culvert file creation"))
+        self.writeSuccess(self.tr("Culvert File Created"))
 
     def verif_culvert_validity(self):
         selectedids = []
         for ft in self.lay_culv.getFeatures():
-            if ft["NAME"] in [NULL, ""]:
+            if is_null(ft["NAME"]) or ft["NAME"] in [NULL, ""]:
                 ft_name = self.tr("Nameless culvert (feature id {})").format(ft.id())
             else:
                 ft_name = ft["NAME"]
 
-            if (ft["N1"] == NULL) or (ft["N2"] == NULL):
+            record = self.record_from_feature(ft)
+            if record["N1"] is None or record["N2"] is None:
                 selectedids.append([ft_name, self.tr("Culvert extremity is not within the mesh.")])
 
-            for fld in self.culv_flds:
-                if fld[0] not in ["NAME", "Remarques"] and fld[2]:
-                    if fld[1] == QMetaType.Type.QString:
-                        if (ft[fld[0]] == NULL) or not isinstance(ft[fld[0]], str):
-                            selectedids.append(
-                                [ft_name, self.tr("{} value is not correct.").format(fld[0])]
-                            )
-                    elif fld[1] == QMetaType.Type.Double:
-                        if (ft[fld[0]] == NULL) or not isinstance(ft[fld[0]], float):
-                            selectedids.append(
-                                [ft_name, self.tr("{} value is not correct.").format(fld[0])]
-                            )
-                    elif fld[1] == QMetaType.Type.Int:
-                        if (ft[fld[0]] == NULL) or not isinstance(ft[fld[0]], int):
-                            selectedids.append(
-                                [ft_name, self.tr("{} value is not correct.").format(fld[0])]
-                            )
+            for code, name in validate_record(record, self.software_select):
+                if code == "not_positive":
+                    selectedids.append([ft_name, self.tr("{} value must be strictly positive.").format(name)])
+                else:
+                    selectedids.append([ft_name, self.tr("{} value is not correct.").format(name)])
 
         return selectedids
 
@@ -825,25 +823,6 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
     ######################################################################################
 
     def import_culvert(self):
-        def get_values(string):
-            values = string.strip().split()
-            return values
-
-        def asDict(headers, values):
-            dico = {}
-            for i, h in enumerate(headers):
-                try:
-                    if values[i] == NULL:
-                        dico[h] = ""
-                    elif values[i].isdigit():
-                        dico[h] = float(values[i])
-                    else:
-                        dico[h] = values[i]
-                # Usually means that NAME is empty
-                except IndexError:
-                    dico[h] = ""
-            return dico
-
         if not self.lay_mesh:
             self.writeError(self.tr("Import a mesh first."))
             return
@@ -856,123 +835,136 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
         culv_flds = [x[0] for x in self.culv_flds]
         dlg = dlg_import_culvert_file(culv_flds, mesh_crs, self)
         dlg.setWindowModality(Qt.WindowModality.WindowModal)
-        if dlg.exec():
-            items = dlg.items
-            self.cb_software_select.setCurrentIndex(dlg.cb_soft.currentIndex())
-            txt_path = dlg.text_file.filePath()
-            layer_path = dlg.layer_file.filePath()
-            layer_crs = dlg.layer_crs.crs()
-            culv_xform = QgsCoordinateTransform(
-                layer_crs, self.canvas.mapSettings().destinationCrs(), self.project
-            )
-            layerDriver = GdalUtils.getVectorDriverFromFileName(layer_path)
-        else:
+        if not dlg.exec():
             return
 
+        self.cb_software_select.setCurrentIndex(dlg.cb_soft.currentIndex())
+        txt_path = dlg.text_file.filePath()
         if not txt_path:
             return
+
+        self.import_culvert_file(txt_path, dlg.items, dlg.layer_file.filePath(), dlg.layer_crs.crs())
+
+    def import_culvert_file(self, txt_path, items, layer_path, layer_crs):
+        """Create a culvert layer from a culvert text file. items maps field.lower() to [field, file column]."""
+        try:
+            culv_file = read_culvert_file(txt_path)
+        except (CulvertFileError, OSError) as err:
+            self.writeError(self.tr("Error when reading culvert file : {}").format(err))
+            return None
+
+        for key in ("n1", "n2"):
+            if items[key][1] not in culv_file.headers:
+                self.writeError(self.tr("Columns of the nodes N1 and N2 are not defined."))
+                return None
+
+        culv_xform = QgsCoordinateTransform(
+            layer_crs, self.canvas.mapSettings().destinationCrs(), self.project
+        )
 
         layerFields = QgsFields()
         for fld in self.culv_flds:
             layerFields.append(QgsField(fld[0], fld[1]))
 
+        # Points are created in the CRS of the layer
         layer = QgsVectorLayer(
-            f"MultiLineString?crs={mesh_crs.authid()}", self.tr("Culverts"), "memory"
+            f"MultiLineString?crs={layer_crs.authid()}", self.tr("Culverts"), "memory"
         )
+        layer.setCrs(layer_crs)
         pr = layer.dataProvider()
         pr.addAttributes(layerFields)
         layer.updateFields()
-        layer.startEditing()
 
-        with open(txt_path, "r") as txt_file:
-            # 1st line is comment
-            txt_file.readline()
-            # Relaxation and number of culverts
-            lineValues = get_values(txt_file.readline())
-            if len(lineValues) == 2:
-                relax, _ = lineValues
-            elif len(lineValues) == 1:
-                # For old culvert files, number of culverts was not specified
-                relax = lineValues[0]
+        kinds = {fld.name: fld.kind for fld in FIELDS}
+        features = []
+        rejected = 0
+        for i, row in enumerate(culv_file.rows, 1):
+            try:
+                n1 = parse_value(row[items["n1"][1]], KIND_INT, "N1")
+                n2 = parse_value(row[items["n2"][1]], KIND_INT, "N2")
+
+                attrs = []
+                for fld in self.culv_flds:
+                    key = items[fld[0].lower()][1]
+                    if fld[0] == "N1":
+                        attrs.append(n1)
+                    elif fld[0] == "N2":
+                        attrs.append(n2)
+                    elif key:
+                        attrs.append(parse_value(row[key], kinds[fld[0]], fld[0]))
+                    elif kinds[fld[0]] in (KIND_INT, KIND_FLOAT):
+                        attrs.append(0)
+                    else:
+                        attrs.append("")
+            except CulvertFileError as error:
+                err = str(error)
             else:
-                return
-            self.sb_relax.setValue(float(relax))
-            # Retrieve headers
-            headers = get_values(txt_file.readline())
-
-            for i, line in enumerate(txt_file.readlines()):
-                lineValues = get_values(line)
-                if lineValues == [""]:
-                    continue
-
-                values = asDict(headers, lineValues)
-
-                fet = QgsFeature()
-
-                n1 = int(values[items["n1"][1]])
-                n2 = int(values[items["n2"][1]])
                 point_n1, err1 = MeshUtils.xyFromN(
                     self.native_mesh, n1, self.lay_mesh_xform, culv_xform
                 )
                 point_n2, err2 = MeshUtils.xyFromN(
                     self.native_mesh, n2, self.lay_mesh_xform, culv_xform
                 )
-
-                if err1 is not None or err2 is not None:
-                    err = " ".join(filter(None, (err1, err2)))
-                    self.writeError(
-                        self.tr("Error when importing culvert {i} with error(s) : {err}").format(
-                            i=i + 1, err=err
-                        )
-                    )
+                err = " ".join(filter(None, (err1, err2)))
+                if not err:
+                    fet = QgsFeature(layer.fields())
+                    fet.setGeometry(QgsGeometry.fromMultiPolylineXY([[point_n1, point_n2]]))
+                    fet.setAttributes(attrs)
+                    features.append(fet)
                     continue
 
-                line = QgsGeometry.fromPolylineXY([point_n1, point_n2])
-                fet.setGeometry(line)
+            rejected += 1
+            self.writeError(
+                self.tr("Error when importing culvert {i} with error(s) : {err}").format(i=i, err=err)
+            )
 
-                attrs = []
-                for fld in self.culv_flds:
-                    key = items[fld[0].lower()][1]
-                    if key:
-                        attr = values[key]
-                    else:
-                        if fld[1] in [QMetaType.Type.Int, QMetaType.Type.Double]:
-                            attr = 0
-                        else:
-                            attr = ""
-                    attrs.append(attr)
+        if not features:
+            self.writeError(self.tr("No culvert imported."))
+            return None
 
-                fet.setAttributes(attrs)
-
-                if fet.isValid():
-                    layer.addFeature(fet)
-
-        if not layer.commitChanges():
-            self.writeError(self.tr("Error during culvert file creation"))
-            return
+        pr.addFeatures(features)
+        layer.updateExtents()
 
         if layer_path:
+            layerDriver = GdalUtils.getVectorDriverFromFileName(layer_path)
             options = QgsVectorFileWriter.SaveVectorOptions()
             options.driverName = layerDriver
             options.fileEncoding = "utf-8"
-            QgsVectorFileWriter.writeAsVectorFormatV2(
+            result = QgsVectorFileWriter.writeAsVectorFormatV2(
                 layer=layer,
                 fileName=layer_path,
                 transformContext=QgsCoordinateTransformContext(),
                 options=options,
             )
+            if result[0] != Qgis.VectorExportResult.Success:
+                self.writeError(self.tr("Error during culvert file creation : {}").format(result[1]))
+                return None
             layer = QgsVectorLayer(
                 layer_path, os.path.basename(layer_path).rsplit(".", 1)[0], "ogr"
             )
 
-        if layer.isValid():
-            layer.setCrs(layer_crs)
-            layer.loadNamedStyle(self.file_culv_style)
-            layer.saveDefaultStyle()
-            self.project.addMapLayer(layer)
-            self.cb_lay_culv.setCurrentIndex(self.cb_lay_culv.findData(layer.id(), 32))
-        else:
+        if not layer.isValid():
             self.writeError(self.tr("Created culvert layer is not valid."))
+            return None
+
+        if culv_file.relax is not None:
+            self.sb_relax.setValue(culv_file.relax)
+
+        layer.setCrs(layer_crs)
+        layer.loadNamedStyle(self.file_culv_style)
+        layer.saveDefaultStyle()
+        self.project.addMapLayer(layer)
+        self.cb_lay_culv.setCurrentIndex(self.cb_lay_culv.findData(layer.id(), 32))
+
+        if rejected:
+            self.writeWarning(
+                self.tr("{imported} culverts imported, {rejected} rejected.").format(
+                    imported=len(features), rejected=rejected
+                )
+            )
+        else:
+            self.writeSuccess(self.tr("{} culverts imported.").format(len(features)))
+        return layer
 
 
 def correctAngle(angle):
@@ -983,17 +975,15 @@ def correctAngle(angle):
     return angle
 
 
+def segmentAngle(p1, p2):
+    return correctAngle(math.degrees(math.atan2(p2.y() - p1.y(), p2.x() - p1.x())))
+
+
 def calculangle(ft):
-    pts = ft.geometry().asMultiPolyline()
+    pts = MeshUtils.lineVertices(ft.geometry())
 
-    deltax = pts[0][1].x() - pts[0][0].x()
-    deltay = pts[0][1].y() - pts[0][0].y()
-    angle0 = correctAngle(np.angle(deltax + deltay * 1j, deg=True))
-    angle1 = correctAngle(angle0 - 180)
-
-    deltax = pts[-1][-1].x() - pts[-1][-2].x()
-    deltay = pts[-1][-1].y() - pts[-1][-2].y()
-    angle2 = correctAngle(np.angle(deltax + deltay * 1j, deg=True))
+    angle1 = correctAngle(segmentAngle(pts[0], pts[1]) - 180)
+    angle2 = segmentAngle(pts[-2], pts[-1])
 
     return angle1, angle2
 
