@@ -54,7 +54,6 @@ from qgis.PyQt.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QLineEdit,
-    QMessageBox,
     QSpinBox,
 )
 
@@ -109,7 +108,6 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
 
         self.cur_culv_id = None
         self.cur_mesh_dataset = None
-        self.cur_mesh_time = None
 
         self.software_select = 0
 
@@ -125,11 +123,9 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
         self.mdl_lay_culv = QStandardItemModel()
 
         self.mdl_mesh_dataset = QStandardItemModel()
-        self.mdl_mesh_time = QStandardItemModel()
 
         self.cb_lay_culv.setModel(self.mdl_lay_culv)
         self.cb_dataset_mesh.setModel(self.mdl_mesh_dataset)
-        self.cb_time_mesh.setModel(self.mdl_mesh_time)
 
         # self.clickTool = QgsMapToolEmitPoint(iface.mapCanvas())
         # self.clickTool.canvasClicked.connect(self.postSelectCulvert)
@@ -142,11 +138,11 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
         self.cb_lay_mesh.currentIndexChanged.connect(self.mesh_lay_changed)
         self.cb_lay_culv.currentIndexChanged.connect(self.culv_lay_changed)
         self.cb_dataset_mesh.currentIndexChanged.connect(self.mesh_dataset_changed)
-        self.cb_time_mesh.currentIndexChanged.connect(self.mesh_time_changed)
 
         self.btn_new_culv_file.clicked.connect(self.new_file)
         self.btn_import_culv_file.clicked.connect(self.import_culvert)
         self.btn_res_val.clicked.connect(self.reset_val)
+        self.btn_update_auto.clicked.connect(self.update_all_auto)
         self.btn_verif.clicked.connect(self.verif_culvert)
         self.btn_create_file.clicked.connect(self.create_file)
         self.cb_software_select.currentIndexChanged.connect(self.soft_changed)
@@ -197,12 +193,14 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
         if self.culv_to_mesh is not None:
             self.gb_output.setEnabled(True)
             self.btn_verif.setEnabled(True)
+            self.btn_update_auto.setEnabled(True)
             self.frm_relax.setEnabled(True)
             self.gb_cur_culv.setEnabled(True)
             self.frm_culv_tools.setEnabled(True)
         else:
             self.gb_output.setEnabled(False)
             self.btn_verif.setEnabled(False)
+            self.btn_update_auto.setEnabled(False)
             self.frm_relax.setEnabled(False)
             self.gb_cur_culv.setEnabled(False)
             self.frm_culv_tools.setEnabled(False)
@@ -225,8 +223,6 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
             self.cb_lay_culv.currentIndexChanged.disconnect(self.culv_lay_changed)
         with suppress(RuntimeError, TypeError):
             self.cb_dataset_mesh.currentIndexChanged.disconnect(self.mesh_dataset_changed)
-        with suppress(RuntimeError, TypeError):
-            self.cb_time_mesh.currentIndexChanged.disconnect(self.mesh_time_changed)
 
     def disconnect_mesh_layer(self):
         """Disconnect only our own slots: a bare disconnect() would also remove QGIS internal connections."""
@@ -279,13 +275,11 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
         if self.lay_mesh:
             self.lay_mesh.crsChanged.connect(self.mesh_crs_changed)
             self.cb_dataset_mesh.setEnabled(True)
-            self.cb_time_mesh.setEnabled(True)
         else:
             self.lay_mesh = None
             self.native_mesh = None
             self.locator = None
             self.cb_dataset_mesh.setEnabled(False)
-            self.cb_time_mesh.setEnabled(False)
         self.cur_mesh_changed()
 
     def update_transforms(self):
@@ -313,12 +307,9 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
     def mesh_crs_changed(self):
         self.update_transforms()
         self.valid_mesh_culv()
-        if self.lay_culv is not None and self.culv_to_mesh is not None:
-            self.update_all_n()
 
     def cur_mesh_changed(self):
         self.mdl_mesh_dataset.clear()
-        self.mdl_mesh_time.clear()
         self.update_transforms()
         if self.lay_mesh is None:
             self.valid_mesh_culv()
@@ -357,7 +348,6 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
         self.mesh_dataset_changed()
 
     def mesh_dataset_changed(self):
-        self.mdl_mesh_time.clear()
         self.cur_mesh_dataset = self.cb_dataset_mesh.currentData(32)
         if self.lay_mesh is not None and self.cur_mesh_dataset is not None:
             self.writeInfo(
@@ -365,39 +355,6 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
                     self.cb_dataset_mesh.currentText()
                 )
             )
-            mesh_prov = self.lay_mesh.dataProvider()
-            for i in range(mesh_prov.datasetCount(self.cur_mesh_dataset)):
-                itm = QStandardItem()
-                itm.setData(
-                    mesh_prov.datasetMetadata(QgsMeshDatasetIndex(self.cur_mesh_dataset, i)).time(),
-                    0,
-                )
-                itm.setData(i, 32)
-                self.mdl_mesh_time.appendRow(itm)
-
-    def mesh_time_changed(self):
-        self.cur_mesh_time = self.cb_time_mesh.currentData(32)
-        if self.cur_mesh_time is not None:
-            self.writeInfo(
-                self.tr("Current mesh timestep changed : {}").format(
-                    self.cb_time_mesh.currentText()
-                )
-            )
-            if self.lay_culv is not None and not self.is_opening:
-                self.update_all_n()
-                if (
-                    QMessageBox.question(
-                        self,
-                        self.tr("Automatic Z Update"),
-                        self.tr(
-                            "Mesh parameters have been changed.\n"
-                            "Update culvert features with Automatic Z checked ?"
-                        ),
-                        QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Ok,
-                    )
-                    == QMessageBox.StandardButton.Ok
-                ):
-                    self.update_all_auto_z()
 
     ######################################################################################
     #                                                                                    #
@@ -461,23 +418,6 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
             self.lay_culv.editingStopped.connect(self.cur_culv_changed)
             self.lay_culv.crsChanged.connect(self.culv_crs_changed)
             self.update_transforms()
-
-            # Nothing to update in a new empty layer
-            if self.culv_to_mesh is not None and self.is_opening is False and self.lay_culv.featureCount() > 0:
-                self.update_all_n()
-                if (
-                    QMessageBox.question(
-                        self,
-                        self.tr("Automatic Z Update"),
-                        self.tr(
-                            "Culvert layer has been changed.\n"
-                            "Update culvert features with Automatic Z checked ?"
-                        ),
-                        QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Ok,
-                    )
-                    == QMessageBox.StandardButton.Ok
-                ):
-                    self.update_all_auto_z()
         else:
             self.lay_culv = None
             self.update_transforms()
@@ -486,8 +426,6 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
     def culv_crs_changed(self):
         self.update_transforms()
         self.valid_mesh_culv()
-        if self.culv_to_mesh is not None:
-            self.update_all_n()
 
     def cur_culv_changed(self):
         if self.lay_culv:
@@ -609,43 +547,35 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
                 if field_idx is not None:
                     self.write_attributes({self.cur_culv_id: {field_idx: val}})
 
+        if ft is not None and self.sender() in (self.cb_auto_z, self.cb_auto_a, self.cb_auto_l):
+            # The automatic option has just been written
+            values, errors = self.auto_values(self.lay_culv.getFeature(self.cur_culv_id))
+            for error in errors:
+                self.writeError(self.tr("Error on automatic values calculation : {}").format(error))
+        else:
+            values = {}
+
         if self.sender() == self.cb_auto_z:
             self.sb_z1.setEnabled(not self.cb_auto_z.isChecked())
             self.sb_z2.setEnabled(not self.cb_auto_z.isChecked())
-            if ft:
-                if not self.mesh_ready():
-                    self.writeError(self.tr("Error on Z calculation : {}").format(self.tr("No valid mesh dataset.")))
-                    return
-
-                (n1, n2), err = self.nodes_of_feature(ft)
-
-                if err is not None:
-                    self.writeError(self.tr("Error on Z calculation : {}").format(err))
-                    return
-
-                attrs = {self.cur_culv_id: {self.field_index("N1"): n1, self.field_index("N2"): n2}}
-
-                if self.cb_auto_z.isChecked():
-                    z1 = MeshUtils.zFromN(self.lay_mesh, self.mesh_dataset_index(), n1)
-                    z2 = MeshUtils.zFromN(self.lay_mesh, self.mesh_dataset_index(), n2)
-
-                    self.sb_z1.setValue(z1)
-                    self.sb_z2.setValue(z2)
-
-                self.write_attributes(attrs)
+            if ft is not None:
+                nodes = {self.field_index(name): values[name] for name in ("N1", "N2") if values.get(name) is not None}
+                self.write_attributes({self.cur_culv_id: nodes})
+                for name, spinbox in (("Z1", self.sb_z1), ("Z2", self.sb_z2)):
+                    if name in values:
+                        spinbox.setValue(values[name])
 
         if self.sender() == self.cb_auto_a:
             self.sb_a1.setEnabled(not self.cb_auto_a.isChecked())
             self.sb_a2.setEnabled(not self.cb_auto_a.isChecked())
-            if ft and (self.cb_auto_a.isChecked()):
-                a1, a2 = calculangle(ft)
-                self.sb_a1.setValue(a1)
-                self.sb_a2.setValue(a2)
+            if "a1" in values:
+                self.sb_a1.setValue(values["a1"])
+                self.sb_a2.setValue(values["a2"])
 
         if self.sender() == self.cb_auto_l:
             self.sb_length.setEnabled(not self.cb_auto_l.isChecked())
-            if ft and (self.cb_auto_l.isChecked()):
-                self.sb_length.setValue(ft.geometry().length())
+            if "LENGTH" in values:
+                self.sb_length.setValue(values["LENGTH"])
 
         if self.sender() == self.cb_circ:
             self.sb_larg.setEnabled(not self.cb_circ.isChecked())
@@ -674,26 +604,73 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
                 elif isinstance(ctrl, QCheckBox):
                     ctrl.setCheckState(Qt.CheckState.Unchecked)
 
+    def mesh_vertices(self, ft):
+        """Vertices of the culvert in the CRS of the mesh, None if the culvert is not valid or cannot be converted."""
+        vertices = MeshUtils.lineVertices(ft.geometry())
+        if len(vertices) < 2 or self.culv_to_mesh is None:
+            return None
+        try:
+            return [self.culv_to_mesh.transform(vertex) for vertex in vertices]
+        except QgsCsException:
+            return None
+
     def nodes_of_feature(self, ft):
         """((N1, N2), error) of the extremities of a culvert."""
-        vertices = MeshUtils.lineVertices(ft.geometry())
-        if len(vertices) < 2 or self.locator is None or self.culv_to_mesh is None:
-            return (None, None), self.tr("The culvert geometry is not valid.")
+        vertices = self.mesh_vertices(ft)
+        if vertices is None or self.locator is None:
+            return (None, None), self.tr("The culvert geometry is not valid or cannot be converted to the mesh CRS.")
 
         nodes = []
         error = None
         for vertex in (vertices[0], vertices[-1]):
-            try:
-                node, err = self.locator.nearest_node(self.culv_to_mesh.transform(vertex))
-            except QgsCsException:
-                node, err = None, self.tr("The coordinates cannot be converted to the CRS of the mesh.")
+            node, err = self.locator.nearest_node(vertex)
             if err is not None:
                 error = err
             nodes.append(node)
         return tuple(nodes), error
 
+    def auto_values(self, ft):
+        """Values computed from the geometry and the mesh, as ({field name: value}, [error messages]).
+
+        N1 and N2 are always computed (None if the extremity is not within the mesh), Z, LENGTH and the angles
+        only for the culverts where the automatic option (AZ, AL, AA) is checked.
+        """
+        (n1, n2), err = self.nodes_of_feature(ft)
+        values = {"N1": n1, "N2": n2}
+        errors = [] if err is None else [err]
+
+        vertices = self.mesh_vertices(ft)
+        if vertices is None:
+            return values, errors
+
+        if ft["AZ"] == 1 and err is None:
+            if self.mesh_ready():
+                for name, node in (("Z1", n1), ("Z2", n2)):
+                    z = MeshUtils.zFromN(self.lay_mesh, self.mesh_dataset_index(), node)
+                    if z is None:
+                        errors.append(self.tr("There is no value in the dataset at node {}.").format(node))
+                    else:
+                        values[name] = z
+            else:
+                errors.append(self.tr("No valid mesh dataset."))
+
+        if ft["AL"] == 1:
+            values["LENGTH"] = sum(p1.distance(p2) for p1, p2 in zip(vertices[:-1], vertices[1:]))
+
+        if ft["AA"] == 1:
+            values["a1"], values["a2"] = calculangle(vertices)
+
+        return values, errors
+
+    def culvert_name(self, ft):
+        name = ft["NAME"]
+        if is_null(name) or name in [NULL, ""]:
+            return self.tr("Nameless culvert (feature id {})").format(ft.id())
+        return name
+
     def mesh_dataset_index(self):
-        return QgsMeshDatasetIndex(self.cur_mesh_dataset, self.cur_mesh_time)
+        # Static dataset, e.g. the bottom elevation
+        return QgsMeshDatasetIndex(self.cur_mesh_dataset, 0)
 
     def mesh_ready(self):
         """True if the node lookup and the dataset used for Z are available."""
@@ -701,54 +678,29 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
             self.lay_mesh is not None
             and self.locator is not None
             and self.cur_mesh_dataset is not None
-            and self.cur_mesh_time is not None
+            and self.lay_mesh.dataProvider().datasetCount(self.cur_mesh_dataset) > 0
         )
 
-    def update_all_n(self, log=True):
+    def update_all_auto(self):
         if self.lay_mesh is None or self.locator is None or self.culv_to_mesh is None:
+            self.writeError(self.tr("Import a mesh first."))
             return
 
         attrs = dict()
         success = True
         for ft in self.lay_culv.getFeatures():
-            (n1, n2), err = self.nodes_of_feature(ft)
-
-            if err is not None:
+            values, errors = self.auto_values(ft)
+            for error in errors:
                 success = False
-                n1 = NULL
-                n2 = NULL
-                if log:
-                    self.writeError(self.tr("Error on N calculation : {}").format(err))
+                self.writeError(self.tr("{} : {}").format(self.culvert_name(ft), error))
 
-            attrs[ft.id()] = {self.field_index("N1"): n1, self.field_index("N2"): n2}
-
-        self.write_attributes(attrs)
-        if log and success:
-            self.writeSuccess(self.tr("N values updated"))
-
-    def update_all_auto_z(self):
-        if not self.mesh_ready():
-            self.writeError(self.tr("Error on Z calculation : {}").format(self.tr("No valid mesh dataset.")))
-            return
-
-        attrs = dict()
-        success = True
-        for ft in self.lay_culv.getFeatures():
-            if ft["AZ"] != 1:
-                continue
-
-            (n1, n2), err = self.nodes_of_feature(ft)
-            if err is None:
-                z1 = MeshUtils.zFromN(self.lay_mesh, self.mesh_dataset_index(), n1)
-                z2 = MeshUtils.zFromN(self.lay_mesh, self.mesh_dataset_index(), n2)
-                attrs[ft.id()] = {self.field_index("Z1"): z1, self.field_index("Z2"): z2}
-            else:
-                success = False
-                self.writeError(self.tr("Error on Z calculation : {}").format(err))
+            attrs[ft.id()] = {
+                self.field_index(name): (NULL if value is None else value) for name, value in values.items()
+            }
 
         self.write_attributes(attrs)
         if success:
-            self.writeSuccess(self.tr("Z values updated"))
+            self.writeSuccess(self.tr("Automatic values updated"))
         self.display_culv_info()
 
     ######################################################################################
@@ -761,8 +713,7 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
         if not self.lay_culv:
             return
 
-        self.update_all_n(log=False)
-        invalidIds = self.verif_culvert_validity()
+        records, invalidIds = self.export_records()
         if not invalidIds:
             self.writeSuccess(self.tr("All culverts are valid"))
         else:
@@ -781,8 +732,10 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
         if not self.lay_culv:
             return
 
-        invalidIds = self.verif_culvert_validity()
+        records, invalidIds = self.export_records()
         if invalidIds:
+            for invalidId in invalidIds:
+                self.writeError("{} : {}".format(*invalidId))
             self.writeError(self.tr("File creation is not possible, some culverts are not valid"))
             return
 
@@ -793,56 +746,45 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
         if not culv_file_name:
             return
 
-        relax = self.sb_relax.value()
-
-        # Uhaina needs the culvert extremities in the mesh CRS
-        culv_to_mesh = self.culv_to_mesh if self.software_select == 1 else None
-
-        records = []
-        for ft in self.lay_culv.getFeatures():
-            record = self.record_from_feature(ft)
-            if culv_to_mesh is not None:
-                vertices = MeshUtils.lineVertices(ft.geometry())
-                try:
-                    pt1 = culv_to_mesh.transform(vertices[0])
-                    pt2 = culv_to_mesh.transform(vertices[-1])
-                except (QgsCsException, IndexError):
-                    self.writeError(
-                        self.tr("Coordinates of culvert {} cannot be converted to the mesh CRS.").format(
-                            record["NAME"] or ft.id()
-                        )
-                    )
-                    return
-                record["_xy"] = (pt1.x(), pt1.y(), pt2.x(), pt2.y())
-            records.append(record)
-
         try:
-            write_culvert_file(culv_file_name, records, self.software_select, relax)
+            write_culvert_file(culv_file_name, records, self.software_select, self.sb_relax.value())
         except (CulvertFileError, OSError) as err:
             self.writeError(self.tr("Error during culvert file creation : {}").format(err))
             return
 
         self.writeSuccess(self.tr("Culvert File Created"))
 
-    def verif_culvert_validity(self):
-        selectedids = []
+    def export_records(self):
+        """Records of the culverts as written in the file, and the list of [culvert name, problem].
+
+        Nothing is read from the automatic fields: nodes, Z, length and angles are computed again, so the file
+        always matches the mesh and the geometries, and the layer is not modified.
+        """
+        records = []
+        problems = []
+        if self.culv_to_mesh is None or self.locator is None:
+            return records, [[self.lay_culv.name(), self.tr("Import a mesh first.")]]
+
         for ft in self.lay_culv.getFeatures():
-            if is_null(ft["NAME"]) or ft["NAME"] in [NULL, ""]:
-                ft_name = self.tr("Nameless culvert (feature id {})").format(ft.id())
-            else:
-                ft_name = ft["NAME"]
-
+            name = self.culvert_name(ft)
             record = self.record_from_feature(ft)
-            if record["N1"] is None or record["N2"] is None:
-                selectedids.append([ft_name, self.tr("Culvert extremity is not within the mesh.")])
 
-            for code, name in validate_record(record, self.software_select):
+            values, errors = self.auto_values(ft)
+            record.update(values)
+            problems += [[name, error] for error in errors]
+
+            for code, field_name in validate_record(record, self.software_select):
                 if code == "not_positive":
-                    selectedids.append([ft_name, self.tr("{} value must be strictly positive.").format(name)])
+                    problems.append([name, self.tr("{} value must be strictly positive.").format(field_name)])
                 else:
-                    selectedids.append([ft_name, self.tr("{} value is not correct.").format(name)])
+                    problems.append([name, self.tr("{} value is not correct.").format(field_name)])
 
-        return selectedids
+            vertices = self.mesh_vertices(ft)
+            if vertices is not None:
+                record["_xy"] = (vertices[0].x(), vertices[0].y(), vertices[-1].x(), vertices[-1].y())
+            records.append(record)
+
+        return records, problems
 
     ######################################################################################
     #                                                                                    #
@@ -1003,11 +945,9 @@ def segmentAngle(p1, p2):
     return correctAngle(math.degrees(math.atan2(p2.y() - p1.y(), p2.x() - p1.x())))
 
 
-def calculangle(ft):
-    pts = MeshUtils.lineVertices(ft.geometry())
-
-    angle1 = correctAngle(segmentAngle(pts[0], pts[1]) - 180)
-    angle2 = segmentAngle(pts[-2], pts[-1])
+def calculangle(vertices):
+    angle1 = correctAngle(segmentAngle(vertices[0], vertices[1]) - 180)
+    angle2 = segmentAngle(vertices[-2], vertices[-1])
 
     return angle1, angle2
 

@@ -23,6 +23,7 @@
  ***************************************************************************/
 """
 import functools
+import math
 
 from typing import Optional
 
@@ -65,9 +66,12 @@ class MeshUtils:
 
     @staticmethod
     def zFromN(mesh: QgsMeshLayer, meshDatasetIndex: QgsMeshDatasetIndex, n: int):
-        dset_val = mesh.dataProvider().datasetValue(meshDatasetIndex, n - 1)
+        """Value of a scalar dataset at node n rounded to 0.01, None if there is no value."""
+        value = mesh.dataProvider().datasetValue(meshDatasetIndex, n - 1).scalar()
+        if not math.isfinite(value):
+            return None
 
-        return round(dset_val.scalar(), 2)
+        return round(value, 2)
 
     @staticmethod
     def xyFromN(nativeMesh: QgsMesh, n: int, xform: Optional[QgsCoordinateTransform] = None):

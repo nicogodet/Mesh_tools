@@ -21,19 +21,6 @@
        <string>Mesh Parameters</string>
       </property>
       <layout class="QGridLayout" name="gridLayout">
-       <item row="1" column="2">
-        <widget class="QLabel" name="label_6">
-         <property name="sizePolicy">
-          <sizepolicy hsizetype="Maximum" vsizetype="Preferred">
-           <horstretch>0</horstretch>
-           <verstretch>0</verstretch>
-          </sizepolicy>
-         </property>
-         <property name="text">
-          <string>Timestep</string>
-         </property>
-        </widget>
-       </item>
        <item row="1" column="0">
         <widget class="QLabel" name="label_5">
          <property name="text">
@@ -54,11 +41,8 @@
          </property>
         </widget>
        </item>
-       <item row="1" column="1">
+       <item row="1" column="1" colspan="3">
         <widget class="QComboBox" name="cb_dataset_mesh"/>
-       </item>
-       <item row="1" column="3">
-        <widget class="QComboBox" name="cb_time_mesh"/>
        </item>
        <item row="0" column="1" colspan="3">
         <widget class="QgsMapLayerComboBox" name="cb_lay_mesh">
@@ -1092,6 +1076,16 @@ A relaxation coefficient of 0.2 means that 20% of time T result is mixed with 80
            </widget>
           </item>
          </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="btn_update_auto">
+         <property name="toolTip">
+          <string>Update the nodes N1 and N2, and the values set to automatic (Z, length, angles) in the culvert layer. They are always recomputed when the culvert file is created.</string>
+         </property>
+         <property name="text">
+          <string>Update automatic values</string>
+         </property>
         </widget>
        </item>
        <item>

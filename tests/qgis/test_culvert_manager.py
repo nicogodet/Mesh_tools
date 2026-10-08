@@ -39,9 +39,9 @@ class CulvertManagerTestCase(unittest.TestCase):
         set_canvas_crs(self.canvas_crs)
         self.folder = make_temp_folder(self)
 
-        # Popups block a headless run
+        # The dock must not ask anything: a popup would block a headless run
         self._question = QMessageBox.question
-        QMessageBox.question = staticmethod(lambda *a, **k: QMessageBox.StandardButton.Cancel)
+        QMessageBox.question = staticmethod(lambda *a, **k: self.fail("unexpected popup"))
         self.addCleanup(setattr, QMessageBox, "question", self._question)
 
         self.dock = CulvertManager()
@@ -90,7 +90,7 @@ class TestNodes(CulvertManagerTestCase):
         self.add_mesh()
         layer = self.add_culvert_layer()
         self.add_culvert(layer, N1=None, N2=None)
-        self.dock.update_all_n()
+        self.dock.update_all_auto()
         ft = next(layer.getFeatures())
         self.assertEqual((ft["N1"], ft["N2"]), (1, 2))
 
@@ -98,10 +98,10 @@ class TestNodes(CulvertManagerTestCase):
         self.add_mesh()
         layer = self.add_culvert_layer()
         self.add_culvert(layer, "MultiLineString((10 5, 900 500))")
-        self.dock.update_all_n(log=False)
+        self.dock.update_all_auto()
         ft = next(layer.getFeatures())
-        for name in ("N1", "N2"):
-            self.assertTrue(ft[name] is None or str(ft[name]) in ("NULL", "None"), name)
+        self.assertEqual(ft["N1"], 1)
+        self.assertTrue(ft["N2"] is None or str(ft["N2"]) in ("NULL", "None"))
 
     def test_linestring_layer_is_accepted(self):
         self.add_mesh()
@@ -113,7 +113,7 @@ class TestNodes(CulvertManagerTestCase):
         self.project.addMapLayer(layer)
         self.dock.cb_lay_culv.setCurrentIndex(self.dock.cb_lay_culv.findData(layer.id(), 32))
         self.add_culvert(layer, "LineString(10 5, 90 20)", N1=None, N2=None)
-        self.dock.update_all_n()
+        self.dock.update_all_auto()
         ft = next(layer.getFeatures())
         self.assertEqual((ft["N1"], ft["N2"]), (1, 2))
 
@@ -121,10 +121,10 @@ class TestNodes(CulvertManagerTestCase):
         self.add_mesh()
         layer = self.add_culvert_layer()
         self.add_culvert(layer, N1=None, N2=None)
-        self.dock.update_all_n()
+        self.dock.update_all_auto()
         before = [(ft["N1"], ft["N2"]) for ft in layer.getFeatures()]
         set_canvas_crs("EPSG:3857")
-        self.dock.update_all_n()
+        self.dock.update_all_auto()
         self.assertEqual([(ft["N1"], ft["N2"]) for ft in layer.getFeatures()], before)
         self.assertEqual(before, [(1, 2)])
 
@@ -141,7 +141,7 @@ class TestNodes(CulvertManagerTestCase):
         self.dock.cb_lay_culv.setCurrentIndex(self.dock.cb_lay_culv.findData(layer.id(), 32))
         wkt = QgsGeometry.fromMultiPolylineXY([points]).asWkt()
         self.add_culvert(layer, wkt, N1=None, N2=None)
-        self.dock.update_all_n()
+        self.dock.update_all_auto()
         ft = next(layer.getFeatures())
         self.assertEqual((ft["N1"], ft["N2"]), (1, 2))
 
@@ -228,7 +228,8 @@ class TestExport(CulvertManagerTestCase):
         header, values = lines[2].split("\t"), lines[3].split("\t")
         self.assertEqual(len(header), len(values))
         self.assertEqual(values[header.index("HAUT2")], "1.2")
-        self.assertEqual(values[header.index("LENGTH")], "10.0")
+        # AL = 1: the length is computed from the geometry
+        self.assertAlmostEqual(float(values[header.index("LENGTH")]), (80**2 + 15**2) ** 0.5)
 
     def test_uhaina(self):
         self.setup_layers()
@@ -238,6 +239,56 @@ class TestExport(CulvertManagerTestCase):
         self.assertEqual(len(header), len(values))
         self.assertEqual(float(values[header.index("X1")]), 10.0)
         self.assertEqual(float(values[header.index("Y2")]), 20.0)
+
+    def test_export_recomputes_automatic_values_without_touching_the_layer(self):
+        self.add_mesh()
+        layer = self.add_culvert_layer()
+        self.add_culvert(layer, N1=999, N2=998, Z1=-5.0, Z2=-5.0, LENGTH=1.0, a1=7.0, a2=7.0, AZ=1, AL=1, AA=1)
+        lines = self.export(0)
+        self.assertIsNotNone(lines)
+        header, values = lines[2].split("\t"), lines[3].split("\t")
+        get = {name: values[header.index(name)] for name in ("N1", "N2", "Z1", "Z2", "LENGTH", "a1", "a2")}
+        self.assertEqual((get["N1"], get["N2"]), ("1", "2"))
+        self.assertEqual((float(get["Z1"]), float(get["Z2"])), (10.0, 11.0))
+        self.assertAlmostEqual(float(get["LENGTH"]), (80**2 + 15**2) ** 0.5)
+        self.assertAlmostEqual(float(get["a2"]), 10.6, places=1)
+        self.assertAlmostEqual(float(get["a1"]), 190.6, places=1)
+        # the layer keeps its own values
+        ft = next(layer.getFeatures())
+        self.assertEqual((ft["N1"], ft["N2"], ft["Z1"], ft["LENGTH"]), (999, 998, -5.0, 1.0))
+
+    def test_manual_values_are_kept_when_automatic_is_off(self):
+        self.add_mesh()
+        layer = self.add_culvert_layer()
+        self.add_culvert(layer, Z1=3.5, Z2=4.5, LENGTH=12.5, a1=1.0, a2=2.0, AZ=0, AL=0, AA=0)
+        lines = self.export(0)
+        header, values = lines[2].split("\t"), lines[3].split("\t")
+        for name, expected in (("Z1", 3.5), ("Z2", 4.5), ("LENGTH", 12.5), ("a1", 1.0), ("a2", 2.0)):
+            self.assertEqual(float(values[header.index(name)]), expected, name)
+
+    def test_culvert_outside_the_mesh_blocks_the_export(self):
+        self.add_mesh()
+        layer = self.add_culvert_layer()
+        self.add_culvert(layer, "MultiLineString((10 5, 900 500))")
+        self.assertIsNone(self.export(0))
+
+    def test_verification_does_not_modify_the_layer(self):
+        self.add_mesh()
+        layer = self.add_culvert_layer()
+        self.add_culvert(layer, N1=999, N2=998)
+        self.dock.verif_culvert()
+        ft = next(layer.getFeatures())
+        self.assertEqual((ft["N1"], ft["N2"]), (999, 998))
+
+    def test_update_button_writes_the_automatic_values(self):
+        self.add_mesh()
+        layer = self.add_culvert_layer()
+        self.add_culvert(layer, N1=999, N2=998, Z1=-5.0, Z2=-5.0, LENGTH=1.0, AZ=1, AL=1, AA=0, a1=7.0)
+        self.dock.btn_update_auto.click()
+        ft = next(layer.getFeatures())
+        self.assertEqual((ft["N1"], ft["N2"], ft["Z1"], ft["Z2"]), (1, 2, 10.0, 11.0))
+        self.assertAlmostEqual(ft["LENGTH"], (80**2 + 15**2) ** 0.5)
+        self.assertEqual(ft["a1"], 7.0)
 
     def test_export_does_not_commit_user_edits(self):
         layer = self.setup_layers()
@@ -359,7 +410,7 @@ class TestImport(CulvertManagerTestCase):
         layer = self.import_text("c\n0.2 1\nN1\tN2\n1\t3\n")
         ft = next(layer.getFeatures())
         self.assertTrue(ft.geometry().isMultipart())
-        self.dock.update_all_n()  # used to raise TypeError on LineString parts
+        self.dock.update_all_auto()  # used to raise TypeError on LineString parts
 
     def test_negative_and_decimal_values(self):
         layer = self.import_text("c\n0.2 1\nN1\tN2\tCE1\tz1\n1\t3\t-0.5\t1e-1\n")
