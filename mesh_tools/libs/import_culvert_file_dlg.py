@@ -55,8 +55,7 @@ class dlg_import_culvert_file(QDialog, FORM_CLASS):
         self.layer_file.setStorageMode(QgsFileWidget.StorageMode.SaveFile)
         self.layer_file.setConfirmOverwrite(True)
         self.layer_file.setDialogTitle(self.tr("Select file"))
-        self.layer_file.setFilter("ESRI Shapefile (*.shp)")
-        # self.layer_file.setFilter("ESRI Shapefile (*.shp);;GeoPackage (*.gpkg)")
+        self.layer_file.setFilter("ESRI Shapefile (*.shp);;GeoPackage (*.gpkg)")
 
         if mesh_crs is not None:
             self.layer_crs.setCrs(mesh_crs)

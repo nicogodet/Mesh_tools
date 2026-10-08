@@ -29,7 +29,6 @@ import time
 
 from contextlib import suppress
 
-from processing.algs.gdal.GdalUtils import GdalUtils
 from qgis.core import (
     NULL,
     Qgis,
@@ -228,19 +227,19 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
     def disconnect_mesh_layer(self):
         """Disconnect only our own slots: a bare disconnect() would also remove QGIS internal connections."""
         if self.lay_mesh is not None:
-            with suppress(RuntimeError, TypeError):
+            with suppress(RuntimeError, TypeError):  # the layer may be already deleted
                 self.lay_mesh.crsChanged.disconnect(self.mesh_crs_changed)
 
     def disconnect_culv_layer(self):
         if self.lay_culv is not None:
-            for signal, slot in (
-                (self.lay_culv.selectionChanged, self.cur_culv_changed),
-                (self.lay_culv.editingStarted, self.cur_culv_changed),
-                (self.lay_culv.editingStopped, self.cur_culv_changed),
-                (self.lay_culv.crsChanged, self.culv_crs_changed),
+            for signal_name, slot in (
+                ("selectionChanged", self.cur_culv_changed),
+                ("editingStarted", self.cur_culv_changed),
+                ("editingStopped", self.cur_culv_changed),
+                ("crsChanged", self.culv_crs_changed),
             ):
-                with suppress(RuntimeError, TypeError):
-                    signal.disconnect(slot)
+                with suppress(RuntimeError, TypeError):  # the layer may be already deleted
+                    getattr(self.lay_culv, signal_name).disconnect(slot)
 
     ######################################################################################
     #                                                                                    #
@@ -375,6 +374,50 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
         if path:
             self.create_new_shp(path, crs)
 
+    def write_vector_file(self, layer, path, name=None):
+        """Save a layer as a shapefile or as a layer of a GeoPackage, whose other layers are kept.
+
+        Return the source of the saved layer, None if it failed.
+        """
+        extension = os.path.splitext(path)[1].lstrip(".").lower()
+        driver = QgsVectorFileWriter.driverForExtension(extension) or "ESRI Shapefile"
+        name = name or os.path.splitext(os.path.basename(path))[0]
+
+        options = QgsVectorFileWriter.SaveVectorOptions()
+        options.driverName = driver
+        options.fileEncoding = "utf-8"
+        source = path
+        if driver == "GPKG":
+            options.layerName = name
+            if os.path.exists(path):
+                options.actionOnExistingFile = QgsVectorFileWriter.ActionOnExistingFile.CreateOrOverwriteLayer
+            source = f"{path}|layername={name}"
+
+        result = QgsVectorFileWriter.writeAsVectorFormatV2(
+            layer=layer,
+            fileName=path,
+            transformContext=QgsCoordinateTransformContext(),
+            options=options,
+        )
+        if result[0] != Qgis.VectorExportResult.Success:
+            self.writeError(self.tr("Error during culvert file creation : {}").format(result[1]))
+            return None
+        return source
+
+    def add_culvert_layer(self, source, crs):
+        """Load a saved culvert layer with its style, and select it."""
+        name = os.path.splitext(os.path.basename(source.split("|")[0]))[0]
+        layer = QgsVectorLayer(source, name, "ogr")
+        if not layer.isValid():
+            self.writeError(self.tr("Created culvert layer is not valid."))
+            return None
+        layer.setCrs(crs)
+        layer.loadNamedStyle(self.file_culv_style)
+        layer.saveDefaultStyle()
+        self.project.addMapLayer(layer)
+        self.cb_lay_culv.setCurrentIndex(self.cb_lay_culv.findData(layer.id(), 32))
+        return layer
+
     def create_new_shp(self, path, crs):
         layerFields = QgsFields()
         for fld in self.culv_flds:
@@ -385,27 +428,10 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
         pr.addAttributes(layerFields)
         tmp_lay.updateFields()
 
-        layerDriver = GdalUtils.getVectorDriverFromFileName(path)
-
-        options = QgsVectorFileWriter.SaveVectorOptions()
-        options.driverName = layerDriver
-        options.fileEncoding = "utf-8"
-        result = QgsVectorFileWriter.writeAsVectorFormatV2(
-            layer=tmp_lay,
-            fileName=path,
-            transformContext=QgsCoordinateTransformContext(),
-            options=options,
-        )
-        if result[0] != Qgis.VectorExportResult.Success:
-            self.writeError(self.tr("Error during culvert file creation : {}").format(result[1]))
-            return
-
-        shp_lay = QgsVectorLayer(path, os.path.basename(path).rsplit(".", 1)[0], "ogr")
-        shp_lay.setCrs(crs)
-        shp_lay.loadNamedStyle(self.file_culv_style)
-        shp_lay.saveDefaultStyle()
-        self.project.addMapLayer(shp_lay)
-        self.cb_lay_culv.setCurrentIndex(self.cb_lay_culv.findData(shp_lay.id(), 32))
+        source = self.write_vector_file(tmp_lay, path)
+        if source is not None:
+            return self.add_culvert_layer(source, crs)
+        return None
 
     def culv_lay_changed(self, *_):
         self.disconnect_culv_layer()
@@ -917,35 +943,21 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
         layer.updateExtents()
 
         if layer_path:
-            layerDriver = GdalUtils.getVectorDriverFromFileName(layer_path)
-            options = QgsVectorFileWriter.SaveVectorOptions()
-            options.driverName = layerDriver
-            options.fileEncoding = "utf-8"
-            result = QgsVectorFileWriter.writeAsVectorFormatV2(
-                layer=layer,
-                fileName=layer_path,
-                transformContext=QgsCoordinateTransformContext(),
-                options=options,
-            )
-            if result[0] != Qgis.VectorExportResult.Success:
-                self.writeError(self.tr("Error during culvert file creation : {}").format(result[1]))
+            source = self.write_vector_file(layer, layer_path)
+            if source is None:
                 return None
-            layer = QgsVectorLayer(
-                layer_path, os.path.basename(layer_path).rsplit(".", 1)[0], "ogr"
-            )
-
-        if not layer.isValid():
-            self.writeError(self.tr("Created culvert layer is not valid."))
-            return None
+            layer = self.add_culvert_layer(source, layer_crs)
+            if layer is None:
+                return None
+        else:
+            layer.setCrs(layer_crs)
+            layer.loadNamedStyle(self.file_culv_style)
+            layer.saveDefaultStyle()
+            self.project.addMapLayer(layer)
+            self.cb_lay_culv.setCurrentIndex(self.cb_lay_culv.findData(layer.id(), 32))
 
         if culv_file.relax is not None:
             self.sb_relax.setValue(culv_file.relax)
-
-        layer.setCrs(layer_crs)
-        layer.loadNamedStyle(self.file_culv_style)
-        layer.saveDefaultStyle()
-        self.project.addMapLayer(layer)
-        self.cb_lay_culv.setCurrentIndex(self.cb_lay_culv.findData(layer.id(), 32))
 
         if rejected:
             self.writeWarning(

@@ -9,7 +9,9 @@ from .utilities import make_temp_folder, set_canvas_crs, write_mesh  # isort: sk
 from qgis.core import (  # noqa: E402
     QgsCoordinateReferenceSystem,
     QgsCoordinateTransform,
+    QgsDataProvider,
     QgsFeature,
+    QgsField,
     QgsGeometry,
     QgsMesh,
     QgsMeshLayer,
@@ -17,6 +19,7 @@ from qgis.core import (  # noqa: E402
     QgsProject,
     QgsVectorLayer,
 )
+from qgis.PyQt.QtCore import QMetaType  # noqa: E402
 from qgis.PyQt.QtWidgets import QFileDialog, QMessageBox  # noqa: E402
 
 from mesh_tools.libs.culvert_fields import FIELDS  # noqa: E402
@@ -383,13 +386,17 @@ class TestSignals(CulvertManagerTestCase):
 
 
 class TestImport(CulvertManagerTestCase):
-    def items(self, path):
+    @staticmethod
+    def items_of(path):
         items = {f.name.lower(): [f.name, ""] for f in FIELDS}
         for header in read_header(path):
             name = field_for_header(header)
             if name:
                 items[name.lower()][1] = header
         return items
+
+    def items(self, path):
+        return self.items_of(path)
 
     def test_official_siphon_file(self):
         # Grid of 30 x 24 nodes, so that nodes 198 and 661 exist and are inside the mesh
@@ -449,6 +456,69 @@ class TestImport(CulvertManagerTestCase):
         self.assertEqual(layer.crs().authid(), "EPSG:3857")
         reopened = QgsVectorLayer(path, "x", "ogr")
         self.assertEqual(reopened.crs().authid(), "EPSG:3857")
+
+
+class TestFormats(CulvertManagerTestCase):
+    """The same actions on a shapefile and on a GeoPackage."""
+
+    def each_format(self):
+        for extension in ("shp", "gpkg"):
+            with self.subTest(extension):
+                self.project.removeAllMapLayers()
+                folder = os.path.join(self.folder, extension)
+                os.makedirs(folder)
+                yield extension, folder
+
+    def test_create_edit_update_export(self):
+        for extension, folder in self.each_format():
+            self.add_mesh()
+            layer = self.add_culvert_layer(os.path.join(folder, f"culv.{extension}"))
+            self.assertIsNotNone(layer)
+            self.assertEqual(layer.fields().lookupField("NB_in_//") >= 0, True)
+            self.add_culvert(layer, N1=999, N2=998)
+            layer.selectAll()
+            self.dock.sb_ce1.setValue(0.7)
+            self.dock.btn_update_auto.click()
+            ft = next(layer.getFeatures())
+            self.assertEqual((ft["CE1"], ft["N1"], ft["N2"]), (0.7, 1, 2))
+            self.assertFalse(layer.isEditable())
+            # saved: read again from the file
+            reopened = QgsVectorLayer(layer.source(), "x", "ogr")
+            self.assertEqual(next(reopened.getFeatures())["N2"], 2)
+            lines = self.export(0)
+            self.assertIsNotNone(lines)
+            self.assertEqual(len(lines[2].split("\t")), len(lines[3].split("\t")))
+
+    def test_style_is_stored_with_the_data(self):
+        for extension, folder in self.each_format():
+            self.add_mesh()
+            path = os.path.join(folder, f"culv.{extension}")
+            layer = self.add_culvert_layer(path)
+            reopened = QgsVectorLayer(layer.source(), "x", "ogr")
+            self.assertEqual(reopened.renderer().type(), "categorizedSymbol")
+
+    def test_import_in_a_geopackage_keeps_its_other_layers(self):
+        self.add_mesh()
+        path = os.path.join(self.folder, "several.gpkg")
+        other = QgsVectorLayer("Point?crs=" + CRS, "other", "memory")
+        other.dataProvider().addAttributes([QgsField("a", QMetaType.Type.Int)])
+        other.updateFields()
+        ft = QgsFeature(other.fields())
+        ft.setGeometry(QgsGeometry.fromWkt("Point(1 1)"))
+        other.dataProvider().addFeatures([ft])
+        self.assertEqual(self.dock.write_vector_file(other, path, "other"), f"{path}|layername=other")
+
+        txt = os.path.join(self.folder, "culv.txt")
+        with open(txt, "w") as f:
+            f.write("c\n0.2 1\nN1\tN2\n1\t3\n")
+        crs = QgsCoordinateReferenceSystem(CRS)
+        layer = self.dock.import_culvert_file(txt, TestImport.items_of(txt), path, crs)
+        self.assertEqual(layer.featureCount(), 1)
+
+        container = QgsVectorLayer(path, "x", "ogr")
+        sub = container.dataProvider().subLayers()
+        names = sorted(s.split(QgsDataProvider.SUBLAYER_SEPARATOR)[1] for s in sub)
+        self.assertEqual(names, ["other", "several"])
 
 
 class TestImportDialog(CulvertManagerTestCase):
