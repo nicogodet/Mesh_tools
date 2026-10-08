@@ -290,6 +290,31 @@ class TestExport(CulvertManagerTestCase):
         self.assertAlmostEqual(ft["LENGTH"], (80**2 + 15**2) ** 0.5)
         self.assertEqual(ft["a1"], 7.0)
 
+    def test_dock_writes_notify_the_layer_and_leave_it_saved(self):
+        self.add_mesh()
+        layer = self.add_culvert_layer()
+        self.add_culvert(layer, N1=999, N2=998)
+        changed = []
+        layer.attributeValueChanged.connect(lambda *a: changed.append(a))
+        self.dock.btn_update_auto.click()
+        self.assertTrue(changed)
+        self.assertFalse(layer.isEditable())
+        self.assertFalse(layer.isModified())
+        # saved in the file
+        reopened = QgsVectorLayer(layer.source(), "x", "ogr")
+        self.assertEqual(next(reopened.getFeatures())["N1"], 1)
+
+    def test_widget_edit_is_written_and_keeps_the_form_enabled(self):
+        self.add_mesh()
+        layer = self.add_culvert_layer()
+        self.add_culvert(layer)
+        layer.selectAll()
+        self.assertEqual(self.dock.cur_culv_id, next(layer.getFeatures()).id())
+        self.assertTrue(self.dock.gb_cur_culv.isEnabled())
+        self.dock.sb_ce1.setValue(0.8)
+        self.assertEqual(next(layer.getFeatures())["CE1"], 0.8)
+        self.assertTrue(self.dock.gb_cur_culv.isEnabled())
+
     def test_export_does_not_commit_user_edits(self):
         layer = self.setup_layers()
         layer.startEditing()

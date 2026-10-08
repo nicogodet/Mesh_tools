@@ -94,6 +94,7 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
         self.path_icon = os.path.join(os.path.dirname(__file__), "..", "icons/")
         self.file_culv_style = os.path.join(os.path.dirname(__file__), "..", "styles/culvert.qml")
         self.ctrl_signal_blocked = False
+        self.is_writing = False
 
         self.frm_culv_tools.hide()
 
@@ -428,6 +429,9 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
         self.valid_mesh_culv()
 
     def cur_culv_changed(self):
+        if self.is_writing:
+            return
+
         if self.lay_culv:
             if self.lay_culv.selectedFeatureCount() == 1:
                 self.cur_culv_id = self.lay_culv.selectedFeatureIds()[0]
@@ -506,14 +510,35 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
             ctrl.setText("" if is_null(val) else str(val))
 
     def write_attributes(self, attrs):
-        """Write {feature id: {field index: value}} without ever committing the user's own edits."""
-        if self.lay_culv.isEditable():
+        """Write {feature id: {field index: value}} through the edit buffer of the layer.
+
+        The layer and its attribute table are notified. If the user is already editing the layer, the changes stay
+        in the buffer (one undo step) and are never committed for them, otherwise they are committed at once.
+        """
+        layer = self.lay_culv
+        was_editing = layer.isEditable()
+
+        # Starting and stopping the edition would refresh and disable the form while the user is typing in it
+        self.is_writing = True
+        try:
+            if not was_editing and not layer.startEditing():
+                self.writeError(self.tr("The culvert layer cannot be edited."))
+                return False
+
+            layer.beginEditCommand(self.tr("Culvert Manager"))
             for fid, values in attrs.items():
                 for idx, value in values.items():
-                    self.lay_culv.changeAttributeValue(fid, idx, value)
-        else:
-            self.lay_culv.dataProvider().changeAttributeValues(attrs)
-            self.lay_culv.triggerRepaint()
+                    layer.changeAttributeValue(fid, idx, value)
+            layer.endEditCommand()
+
+            if not was_editing and not layer.commitChanges():
+                errors = " ".join(layer.commitErrors())
+                self.writeError(self.tr("Error when saving the culvert layer : {}").format(errors))
+                layer.rollBack()
+                return False
+        finally:
+            self.is_writing = False
+        return True
 
     def field_index(self, name):
         return self.lay_culv.fields().lookupField(name)
