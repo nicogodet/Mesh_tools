@@ -70,6 +70,7 @@ from .culvert_io import (
     write_culvert_file,
 )
 from .import_culvert_file_dlg import dlg_import_culvert_file
+from .mesh_locator import MeshNodeLocator
 from .MeshUtils import MeshUtils
 
 FORM_CLASS, _ = uic.loadUiType(
@@ -98,12 +99,13 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
         self.frm_culv_tools.hide()
 
         self.lay_mesh = None
-        self.lay_mesh_xform = None
         self.lay_culv = None
-        self.lay_culv_xform = None
+        # Transforms between the culvert layer CRS and the mesh CRS, None if one of the layers is missing/invalid
+        self.culv_to_mesh = None
+        self.mesh_to_culv = None
 
         self.native_mesh = None
-        self.vertices = None
+        self.locator = None
 
         self.cur_culv_id = None
         self.cur_mesh_dataset = None
@@ -192,7 +194,7 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
                 self.mdl_lay_culv.sort(0)
 
     def valid_mesh_culv(self):
-        if self.lay_mesh_xform is not None and self.lay_culv_xform is not None:
+        if self.culv_to_mesh is not None:
             self.gb_output.setEnabled(True)
             self.btn_verif.setEnabled(True)
             self.frm_relax.setEnabled(True)
@@ -230,7 +232,7 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
         """Disconnect only our own slots: a bare disconnect() would also remove QGIS internal connections."""
         if self.lay_mesh is not None:
             with suppress(RuntimeError, TypeError):
-                self.lay_mesh.crsChanged.disconnect(self.cur_mesh_changed)
+                self.lay_mesh.crsChanged.disconnect(self.mesh_crs_changed)
 
     def disconnect_culv_layer(self):
         if self.lay_culv is not None:
@@ -238,7 +240,7 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
                 (self.lay_culv.selectionChanged, self.cur_culv_changed),
                 (self.lay_culv.editingStarted, self.cur_culv_changed),
                 (self.lay_culv.editingStopped, self.cur_culv_changed),
-                (self.lay_culv.crsChanged, self.culv_lay_changed),
+                (self.lay_culv.crsChanged, self.culv_crs_changed),
             ):
                 with suppress(RuntimeError, TypeError):
                     signal.disconnect(slot)
@@ -275,48 +277,65 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
         self.lay_mesh = layer
 
         if self.lay_mesh:
-            self.lay_mesh.crsChanged.connect(self.cur_mesh_changed)
+            self.lay_mesh.crsChanged.connect(self.mesh_crs_changed)
             self.cb_dataset_mesh.setEnabled(True)
             self.cb_time_mesh.setEnabled(True)
         else:
             self.lay_mesh = None
             self.native_mesh = None
-            self.vertices = None
-            self.lay_mesh_xform = None
+            self.locator = None
             self.cb_dataset_mesh.setEnabled(False)
             self.cb_time_mesh.setEnabled(False)
         self.cur_mesh_changed()
 
+    def update_transforms(self):
+        """The node lookup works in the CRS of the mesh: nothing depends on the CRS of the project."""
+        self.culv_to_mesh = None
+        self.mesh_to_culv = None
+
+        if self.lay_mesh is None:
+            return
+
+        if not self.lay_mesh.crs().isValid():
+            self.writeError(self.tr("Mesh CRS is not valid."))
+            return
+
+        if self.lay_culv is None:
+            return
+
+        if not self.lay_culv.crs().isValid():
+            self.writeWarning(self.tr("Culvert layer CRS is not valid."))
+            return
+
+        self.culv_to_mesh = QgsCoordinateTransform(self.lay_culv.crs(), self.lay_mesh.crs(), self.project)
+        self.mesh_to_culv = QgsCoordinateTransform(self.lay_mesh.crs(), self.lay_culv.crs(), self.project)
+
+    def mesh_crs_changed(self):
+        self.update_transforms()
+        self.valid_mesh_culv()
+        if self.lay_culv is not None and self.culv_to_mesh is not None:
+            self.update_all_n()
+
     def cur_mesh_changed(self):
         self.mdl_mesh_dataset.clear()
         self.mdl_mesh_time.clear()
+        self.update_transforms()
         if self.lay_mesh is None:
+            self.valid_mesh_culv()
             return
 
         self.writeInfo(self.tr("Current mesh changed : {}").format(self.lay_mesh.name()))
         self.native_mesh = QgsMesh()
         self.lay_mesh.dataProvider().populateMesh(self.native_mesh)
 
-        if self.lay_mesh.crs().isValid():
-            self.lay_mesh_xform = QgsCoordinateTransform(
-                self.lay_mesh.crs(), self.canvas.mapSettings().destinationCrs(), self.project
-            )
-            # Mesh snapping works on the triangular mesh, which is otherwise only built when the layer is rendered
-            self.lay_mesh.updateTriangularMesh(self.lay_mesh_xform)
-        else:
-            self.lay_mesh_xform = None
-            self.valid_mesh_culv()
-            self.writeError(self.tr("Mesh CRS is not valid."))
-            return
+        self.writeInfo(self.tr("Creation of faces spatial index..."))
+        t0 = time.time()
+        self.locator = MeshNodeLocator(self.native_mesh)
+        self.writeInfo(
+            self.tr("Faces spatial index created in {} sec.").format(round(time.time() - t0, 1))
+        )
 
         self.valid_mesh_culv()
-
-        self.writeInfo(self.tr("Creation of vertices spatial index..."))
-        t0 = time.time()
-        self.vertices = MeshUtils.createVerticesSpatialIndex(self.native_mesh, self.lay_mesh_xform)
-        self.writeInfo(
-            self.tr("Vertices spatial index created in {} sec.").format(round(time.time() - t0, 1))
-        )
 
         self.cb_dataset_mesh.blockSignals(True)
         mesh_prov = self.lay_mesh.dataProvider()
@@ -440,18 +459,11 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
             self.lay_culv.selectionChanged.connect(self.cur_culv_changed)
             self.lay_culv.editingStarted.connect(self.cur_culv_changed)
             self.lay_culv.editingStopped.connect(self.cur_culv_changed)
-            self.lay_culv.crsChanged.connect(self.culv_lay_changed)
-
-            if self.lay_culv.crs().isValid():
-                self.lay_culv_xform = QgsCoordinateTransform(
-                    self.lay_culv.crs(), self.canvas.mapSettings().destinationCrs(), self.project
-                )
-            else:
-                self.lay_culv_xform = None
-                self.writeWarning(self.tr("Culvert layer CRS is not valid."))
+            self.lay_culv.crsChanged.connect(self.culv_crs_changed)
+            self.update_transforms()
 
             # Nothing to update in a new empty layer
-            if self.lay_mesh is not None and self.is_opening is False and self.lay_culv.featureCount() > 0:
+            if self.culv_to_mesh is not None and self.is_opening is False and self.lay_culv.featureCount() > 0:
                 self.update_all_n()
                 if (
                     QMessageBox.question(
@@ -468,8 +480,14 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
                     self.update_all_auto_z()
         else:
             self.lay_culv = None
-            self.lay_culv_xform = None
+            self.update_transforms()
         self.valid_mesh_culv()
+
+    def culv_crs_changed(self):
+        self.update_transforms()
+        self.valid_mesh_culv()
+        if self.culv_to_mesh is not None:
+            self.update_all_n()
 
     def cur_culv_changed(self):
         if self.lay_culv:
@@ -599,9 +617,7 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
                     self.writeError(self.tr("Error on Z calculation : {}").format(self.tr("No valid mesh dataset.")))
                     return
 
-                (n1, n2), err = MeshUtils.n1n2FromFeature(
-                    self.lay_mesh, self.vertices, ft, self.lay_culv_xform
-                )
+                (n1, n2), err = self.nodes_of_feature(ft)
 
                 if err is not None:
                     self.writeError(self.tr("Error on Z calculation : {}").format(err))
@@ -658,6 +674,24 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
                 elif isinstance(ctrl, QCheckBox):
                     ctrl.setCheckState(Qt.CheckState.Unchecked)
 
+    def nodes_of_feature(self, ft):
+        """((N1, N2), error) of the extremities of a culvert."""
+        vertices = MeshUtils.lineVertices(ft.geometry())
+        if len(vertices) < 2 or self.locator is None or self.culv_to_mesh is None:
+            return (None, None), self.tr("The culvert geometry is not valid.")
+
+        nodes = []
+        error = None
+        for vertex in (vertices[0], vertices[-1]):
+            try:
+                node, err = self.locator.nearest_node(self.culv_to_mesh.transform(vertex))
+            except QgsCsException:
+                node, err = None, self.tr("The coordinates cannot be converted to the CRS of the mesh.")
+            if err is not None:
+                error = err
+            nodes.append(node)
+        return tuple(nodes), error
+
     def mesh_dataset_index(self):
         return QgsMeshDatasetIndex(self.cur_mesh_dataset, self.cur_mesh_time)
 
@@ -665,21 +699,19 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
         """True if the node lookup and the dataset used for Z are available."""
         return (
             self.lay_mesh is not None
-            and self.vertices is not None
+            and self.locator is not None
             and self.cur_mesh_dataset is not None
             and self.cur_mesh_time is not None
         )
 
     def update_all_n(self, log=True):
-        if self.lay_mesh is None or self.vertices is None:
+        if self.lay_mesh is None or self.locator is None or self.culv_to_mesh is None:
             return
 
         attrs = dict()
         success = True
         for ft in self.lay_culv.getFeatures():
-            (n1, n2), err = MeshUtils.n1n2FromFeature(
-                self.lay_mesh, self.vertices, ft, self.lay_culv_xform
-            )
+            (n1, n2), err = self.nodes_of_feature(ft)
 
             if err is not None:
                 success = False
@@ -705,9 +737,7 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
             if ft["AZ"] != 1:
                 continue
 
-            (n1, n2), err = MeshUtils.n1n2FromFeature(
-                self.lay_mesh, self.vertices, ft, self.lay_culv_xform
-            )
+            (n1, n2), err = self.nodes_of_feature(ft)
             if err is None:
                 z1 = MeshUtils.zFromN(self.lay_mesh, self.mesh_dataset_index(), n1)
                 z2 = MeshUtils.zFromN(self.lay_mesh, self.mesh_dataset_index(), n2)
@@ -766,9 +796,7 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
         relax = self.sb_relax.value()
 
         # Uhaina needs the culvert extremities in the mesh CRS
-        culv_to_mesh = None
-        if self.software_select == 1:
-            culv_to_mesh = QgsCoordinateTransform(self.lay_culv.crs(), self.lay_mesh.crs(), self.project)
+        culv_to_mesh = self.culv_to_mesh if self.software_select == 1 else None
 
         records = []
         for ft in self.lay_culv.getFeatures():
@@ -858,9 +886,9 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
                 self.writeError(self.tr("Columns of the nodes N1 and N2 are not defined."))
                 return None
 
-        culv_xform = QgsCoordinateTransform(
-            layer_crs, self.canvas.mapSettings().destinationCrs(), self.project
-        )
+        mesh_to_layer = None
+        if self.lay_mesh.crs().isValid():
+            mesh_to_layer = QgsCoordinateTransform(self.lay_mesh.crs(), layer_crs, self.project)
 
         layerFields = QgsFields()
         for fld in self.culv_flds:
@@ -899,12 +927,8 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
             except CulvertFileError as error:
                 err = str(error)
             else:
-                point_n1, err1 = MeshUtils.xyFromN(
-                    self.native_mesh, n1, self.lay_mesh_xform, culv_xform
-                )
-                point_n2, err2 = MeshUtils.xyFromN(
-                    self.native_mesh, n2, self.lay_mesh_xform, culv_xform
-                )
+                point_n1, err1 = MeshUtils.xyFromN(self.native_mesh, n1, mesh_to_layer)
+                point_n2, err2 = MeshUtils.xyFromN(self.native_mesh, n2, mesh_to_layer)
                 err = " ".join(filter(None, (err1, err2)))
                 if not err:
                     fet = QgsFeature(layer.fields())

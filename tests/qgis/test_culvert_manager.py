@@ -1,15 +1,19 @@
 # -*- coding: utf-8 -*-
 
 import os
+import random
 import unittest
 
 from .utilities import make_temp_folder, set_canvas_crs, write_mesh  # isort: skip
 
 from qgis.core import (  # noqa: E402
     QgsCoordinateReferenceSystem,
+    QgsCoordinateTransform,
     QgsFeature,
     QgsGeometry,
+    QgsMesh,
     QgsMeshLayer,
+    QgsPointXY,
     QgsProject,
     QgsVectorLayer,
 )
@@ -18,6 +22,7 @@ from qgis.PyQt.QtWidgets import QFileDialog, QMessageBox  # noqa: E402
 from mesh_tools.libs.culvert_fields import FIELDS  # noqa: E402
 from mesh_tools.libs.culvert_io import field_for_header, read_header  # noqa: E402
 from mesh_tools.libs.culvert_manager import CulvertManager  # noqa: E402
+from mesh_tools.libs.mesh_locator import MeshNodeLocator  # noqa: E402
 
 CRS = "EPSG:2154"
 SIPHON = os.path.join(os.path.dirname(__file__), "data", "fo1_siphon.txt")
@@ -112,10 +117,101 @@ class TestNodes(CulvertManagerTestCase):
         ft = next(layer.getFeatures())
         self.assertEqual((ft["N1"], ft["N2"]), (1, 2))
 
+    def test_project_crs_change_does_not_change_nodes(self):
+        self.add_mesh()
+        layer = self.add_culvert_layer()
+        self.add_culvert(layer, N1=None, N2=None)
+        self.dock.update_all_n()
+        before = [(ft["N1"], ft["N2"]) for ft in layer.getFeatures()]
+        set_canvas_crs("EPSG:3857")
+        self.dock.update_all_n()
+        self.assertEqual([(ft["N1"], ft["N2"]) for ft in layer.getFeatures()], before)
+        self.assertEqual(before, [(1, 2)])
+
+    def test_culvert_crs_differs_from_mesh_crs(self):
+        self.add_mesh()
+        to_3942 = QgsCoordinateTransform(
+            QgsCoordinateReferenceSystem(CRS), QgsCoordinateReferenceSystem("EPSG:3942"), self.project
+        )
+        points = [to_3942.transform(QgsPointXY(x, y)) for x, y in ((10, 5), (90, 20))]
+        layer = QgsVectorLayer("MultiLineString?crs=EPSG:3942", "culvert 3942", "memory")
+        layer.dataProvider().addAttributes(self.dock_fields())
+        layer.updateFields()
+        self.project.addMapLayer(layer)
+        self.dock.cb_lay_culv.setCurrentIndex(self.dock.cb_lay_culv.findData(layer.id(), 32))
+        wkt = QgsGeometry.fromMultiPolylineXY([points]).asWkt()
+        self.add_culvert(layer, wkt, N1=None, N2=None)
+        self.dock.update_all_n()
+        ft = next(layer.getFeatures())
+        self.assertEqual((ft["N1"], ft["N2"]), (1, 2))
+
     def dock_fields(self):
         from qgis.core import QgsField
 
         return [QgsField(f[0], f[1]) for f in self.dock.culv_flds]
+
+
+def grid_mesh(path, nx=15, ny=12, quads=False):
+    """Regular mesh (spacing 10), triangles or quads, nodes numbered by rows."""
+    with open(path, "w") as f:
+        f.write("MESH2D\n")
+        for n in range(nx * ny):
+            f.write(f"ND {n + 1} {n % nx * 10.0} {n // nx * 10.0} 0.0\n")
+        e = 1
+        for j in range(ny - 1):
+            for i in range(nx - 1):
+                a = j * nx + i + 1
+                if quads:
+                    f.write(f"E4Q {e} {a} {a + 1} {a + nx + 1} {a + nx} 1\n")
+                    e += 1
+                else:
+                    f.write(f"E3T {e} {a} {a + 1} {a + nx} 1\n")
+                    f.write(f"E3T {e + 1} {a + 1} {a + nx + 1} {a + nx} 1\n")
+                    e += 2
+    return nx, ny
+
+
+class TestLocator(CulvertManagerTestCase):
+    def locator(self, quads):
+        path = os.path.join(self.folder, "grid.2dm")
+        self.nx, self.ny = grid_mesh(path, quads=quads)
+        layer = QgsMeshLayer(path, "grid", "mdal")
+        native = QgsMesh()
+        layer.dataProvider().populateMesh(native)
+        return MeshNodeLocator(native)
+
+    def brute_force(self, x, y):
+        best = min(
+            ((x - i % self.nx * 10.0) ** 2 + (y - i // self.nx * 10.0) ** 2, i + 1) for i in range(self.nx * self.ny)
+        )
+        return best[1], best[0]
+
+    def check_random_points(self, quads):
+        locator = self.locator(quads)
+        rng = random.Random(1)
+        for _ in range(300):
+            x, y = rng.uniform(0, (self.nx - 1) * 10), rng.uniform(0, (self.ny - 1) * 10)
+            node, err = locator.nearest_node(QgsPointXY(x, y))
+            self.assertIsNone(err)
+            expected, dist = self.brute_force(x, y)
+            # Ties (points on a bisector) may give another node at the same distance
+            got = ((x - (node - 1) % self.nx * 10.0) ** 2 + (y - (node - 1) // self.nx * 10.0) ** 2)
+            self.assertAlmostEqual(got, dist, places=6, msg=f"{x} {y} {node} {expected}")
+
+    def test_nearest_node_triangles(self):
+        self.check_random_points(False)
+
+    def test_nearest_node_quads(self):
+        self.check_random_points(True)
+
+    def test_outside_and_borders(self):
+        locator = self.locator(False)
+        node, err = locator.nearest_node(QgsPointXY(-1.0, 5.0))
+        self.assertIsNone(node)
+        self.assertIsNotNone(err)
+        self.assertEqual(locator.nearest_node(QgsPointXY(0.0, 0.0))[0], 1)
+        self.assertEqual(locator.nearest_node(QgsPointXY(140.0, 110.0))[0], self.nx * self.ny)
+        self.assertEqual(locator.nearest_node(QgsPointXY(61.0, 0.0))[0], 7)
 
 
 class TestExport(CulvertManagerTestCase):
@@ -184,19 +280,13 @@ class TestSignals(CulvertManagerTestCase):
     def test_crs_change_does_not_multiply_connections(self):
         mesh = self.add_mesh()
         calls = []
-        original = self.dock.vertices
-        from mesh_tools.libs import culvert_manager
-
-        real = culvert_manager.MeshUtils.createVerticesSpatialIndex
-        culvert_manager.MeshUtils.createVerticesSpatialIndex = staticmethod(
-            lambda *a, **k: calls.append(1) or real(*a, **k)
-        )
-        self.addCleanup(setattr, culvert_manager.MeshUtils, "createVerticesSpatialIndex", staticmethod(real))
+        real = CulvertManager.update_transforms
+        CulvertManager.update_transforms = lambda s: calls.append(1) or real(s)
+        self.addCleanup(setattr, CulvertManager, "update_transforms", real)
         for authid in ("EPSG:3942", "EPSG:3943", CRS):
             calls.clear()
             mesh.setCrs(QgsCoordinateReferenceSystem(authid))
             self.assertEqual(len(calls), 1, authid)
-        self.assertIsNotNone(original)
 
     def test_switching_culvert_layers_does_not_multiply_connections(self):
         self.add_mesh()

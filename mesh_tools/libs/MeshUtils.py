@@ -27,8 +27,8 @@ import functools
 from typing import Optional
 
 from qgis.core import (
-    Qgis,
     QgsCoordinateTransform,
+    QgsCsException,
     QgsFeature,
     QgsGeometry,
     QgsLineString,
@@ -45,28 +45,6 @@ from qgis.PyQt.QtWidgets import QApplication
 
 class MeshUtils:
     @staticmethod
-    def pointInMesh(mesh: QgsMeshLayer, point: QgsPointXY) -> bool:
-        return not mesh.snapOnElement(QgsMesh.ElementType.Face, point, 0).isEmpty()
-
-    @staticmethod
-    def findNearestVertex(
-        mesh: QgsMeshLayer, vertexSpatialIndex: QgsSpatialIndex, point: QgsPointXY, xform: QgsCoordinateTransform
-    ):
-        error = None
-        vertexIndex = None
-
-        x_point = xform.transform(point)
-
-        # snapOnElement expects map coordinates (CRS of the transformed point)
-        if not MeshUtils.pointInMesh(mesh, x_point):
-            error = MeshUtils.tr("The point is not within the mesh.")
-            return vertexIndex, error
-
-        vertexIndex = vertexSpatialIndex.nearestNeighbor(x_point, 1)[0]
-
-        return vertexIndex + 1, error
-
-    @staticmethod
     def findVerticesInGeometry(
         nativeMesh: QgsMesh, vertexSpatialIndex: QgsSpatialIndex, xform: QgsCoordinateTransform, geometry: QgsGeometry
     ):
@@ -77,25 +55,6 @@ class MeshUtils:
             if geometry.contains(point):
                 vertices.append(point)
         return vertices
-
-    @staticmethod
-    def n1n2FromFeature(
-        mesh: QgsMeshLayer, vertexSpatialIndex: QgsSpatialIndex, feat: QgsFeature, xform: QgsCoordinateTransform
-    ):
-        error = None
-        n = [None, None]
-
-        vertices = MeshUtils.lineVertices(feat.geometry())
-        if len(vertices) < 2:
-            return n, MeshUtils.tr("The culvert geometry is not valid.")
-
-        for p in (0, -1):
-            n[p], err = MeshUtils.findNearestVertex(mesh, vertexSpatialIndex, vertices[p], xform)
-
-            if err is not None:
-                error = err
-
-        return n, error
 
     @staticmethod
     def lineVertices(geometry: QgsGeometry) -> list:
@@ -111,7 +70,8 @@ class MeshUtils:
         return round(dset_val.scalar(), 2)
 
     @staticmethod
-    def xyFromN(nativeMesh: QgsMesh, n: int, mesh_xorm: QgsCoordinateTransform, layer_xform: QgsCoordinateTransform):
+    def xyFromN(nativeMesh: QgsMesh, n: int, xform: Optional[QgsCoordinateTransform] = None):
+        """Point of the node n, transformed with xform (mesh CRS to another CRS) if given."""
         error = None
         point = None
 
@@ -125,11 +85,12 @@ class MeshUtils:
 
         point = QgsPointXY(nativeMesh.vertex(n - 1))
 
-        # It's safer to transform mesh point to canvas CRS then reverse transform
-        # to layer CRS.
-        if mesh_xorm is not None and layer_xform is not None:
-            point = mesh_xorm.transform(point)
-            point = layer_xform.transform(point, Qgis.TransformDirection.Reverse)
+        if xform is not None:
+            try:
+                point = xform.transform(point)
+            except QgsCsException:
+                point = None
+                error = MeshUtils.tr("The node coordinates cannot be converted to the CRS of the layer.")
 
         return point, error
 
