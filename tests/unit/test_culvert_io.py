@@ -74,6 +74,11 @@ class TestWrite(unittest.TestCase):
         lines = data_lines(format_culvert_file([record(NAME="NULLable")], SOFT_TELEMAC))
         self.assertTrue(lines[3].endswith("\tNULLable"))
 
+    def test_name_with_tab_or_line_break_stays_on_one_line(self):
+        lines = data_lines(format_culvert_file([record(NAME="a\tb\nc")], SOFT_TELEMAC))
+        self.assertEqual(len(lines), 4)
+        self.assertTrue(lines[3].endswith("\ta b c"))
+
     def test_empty_numeric_value_is_an_error(self):
         with self.assertRaises(CulvertFileError):
             format_culvert_file([record(CE1=None)], SOFT_TELEMAC)
@@ -180,6 +185,8 @@ class TestRead(unittest.TestCase):
             read_culvert_file(self.write("only\ntwo lines\n"))
         with self.assertRaises(CulvertFileError):
             read_culvert_file(self.write("c\n0.2 1 3\nN1\n1\n"))
+        with self.assertRaises(CulvertFileError):
+            read_culvert_file(self.write("c\n0.2 1\n\n1\t2\n"))
 
     def test_parse_value(self):
         self.assertEqual(parse_value("-1.2", "float"), -1.2)

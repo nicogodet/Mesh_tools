@@ -521,6 +521,45 @@ class TestFormats(CulvertManagerTestCase):
         self.assertEqual(names, ["other", "several"])
 
 
+class TestMeshDataset(CulvertManagerTestCase):
+    def test_only_scalar_datasets_on_nodes_are_used_for_z(self):
+        from qgis.core import QgsMeshDatasetGroupMetadata as Metadata
+        from qgis.PyQt.QtCore import QDateTime
+
+        from mesh_tools.libs.MeshUtils import MeshUtils
+
+        def metadata(scalar, data_type):
+            return Metadata("bottom", "", scalar, data_type, 0.0, 1.0, 3, QDateTime(), False, {})
+
+        self.assertTrue(MeshUtils.isScalarOnVertices(metadata(True, Metadata.DataType.DataOnVertices)))
+        self.assertFalse(MeshUtils.isScalarOnVertices(metadata(True, Metadata.DataType.DataOnFaces)))
+        self.assertFalse(MeshUtils.isScalarOnVertices(metadata(False, Metadata.DataType.DataOnVertices)))
+
+    def test_bottom_dataset_names(self):
+        from mesh_tools.libs.culvert_manager import is_bottom_dataset
+
+        for name in ("BOTTOM", "Fond", "bottom", "Bed Elevation"):
+            self.assertTrue(is_bottom_dataset(name), name)
+        self.assertFalse(is_bottom_dataset("VELOCITY U"))
+        self.add_mesh()
+        self.assertEqual(self.dock.cb_dataset_mesh.currentText(), "Bed Elevation")
+
+
+class TestResetValues(CulvertManagerTestCase):
+    def test_reset_writes_once(self):
+        self.add_mesh()
+        layer = self.add_culvert_layer()
+        self.add_culvert(layer, CE1=0.9, CS1=0.3, AZ=1)
+        layer.selectAll()
+        commits = []
+        layer.afterCommitChanges.connect(lambda: commits.append(1))
+        self.dock.btn_res_val.click()
+        self.assertEqual(len(commits), 1)
+        ft = next(layer.getFeatures())
+        self.assertEqual((ft["CE1"], ft["CS1"], ft["AZ"]), (0.5, 1.0, 0))
+        self.assertTrue(self.dock.sb_z1.isEnabled())
+
+
 class TestImportDialog(CulvertManagerTestCase):
     def test_space_separated_official_file_is_mapped(self):
         from mesh_tools.libs.import_culvert_file_dlg import dlg_import_culvert_file

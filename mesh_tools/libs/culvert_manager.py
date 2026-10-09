@@ -99,9 +99,8 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
 
         self.lay_mesh = None
         self.lay_culv = None
-        # Transforms between the culvert layer CRS and the mesh CRS, None if one of the layers is missing/invalid
+        # Transform from the culvert layer CRS to the mesh CRS, None if one of the layers is missing/invalid
         self.culv_to_mesh = None
-        self.mesh_to_culv = None
 
         self.native_mesh = None
         self.locator = None
@@ -117,8 +116,6 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
             [f.name, QT_TYPES[f.kind], getattr(self, f.widget) if f.widget else None, f.telemac_col, f.uhaina_col]
             for f in FIELDS
         ]
-
-        self.is_opening = True
 
         self.mdl_lay_culv = QStandardItemModel()
 
@@ -167,8 +164,6 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
 
         if self.mdl_lay_culv.rowCount() == 0:
             self.culv_lay_changed()
-
-        self.is_opening = False
 
     def addLayers(self, layers):
         for lay in layers:
@@ -285,7 +280,6 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
     def update_transforms(self):
         """The node lookup works in the CRS of the mesh: nothing depends on the CRS of the project."""
         self.culv_to_mesh = None
-        self.mesh_to_culv = None
 
         if self.lay_mesh is None:
             return
@@ -302,7 +296,6 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
             return
 
         self.culv_to_mesh = QgsCoordinateTransform(self.lay_culv.crs(), self.lay_mesh.crs(), self.project)
-        self.mesh_to_culv = QgsCoordinateTransform(self.lay_mesh.crs(), self.lay_culv.crs(), self.project)
 
     def mesh_crs_changed(self):
         self.update_transforms()
@@ -332,14 +325,18 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
         mesh_prov = self.lay_mesh.dataProvider()
         indexFound = None
         for i in range(mesh_prov.datasetGroupCount()):
+            metadata = mesh_prov.datasetGroupMetadata(i)
+            # Z is read at the nodes: other datasets would give wrong values
+            if not MeshUtils.isScalarOnVertices(metadata):
+                continue
             itm = QStandardItem()
-            datasetName = mesh_prov.datasetGroupMetadata(i).name()
+            datasetName = metadata.name()
             itm.setData(datasetName, 0)
             itm.setData(i, 32)
             self.mdl_mesh_dataset.appendRow(itm)
 
-            if any(name in datasetName for name in ["fond", "bottom"]):
-                indexFound = i
+            if indexFound is None and is_bottom_dataset(datasetName):
+                indexFound = self.mdl_mesh_dataset.rowCount() - 1
 
         if indexFound is not None:
             self.cb_dataset_mesh.setCurrentIndex(indexFound)
@@ -576,17 +573,7 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
                 ft = self.lay_culv.getFeature(self.cur_culv_id)
 
                 ctrl = self.sender()
-                if isinstance(ctrl, QDoubleSpinBox) or isinstance(ctrl, QSpinBox):
-                    val = ctrl.value()
-                elif isinstance(ctrl, QComboBox):
-                    val = ctrl.currentIndex()
-                elif isinstance(ctrl, QCheckBox):
-                    if ctrl.checkState() == Qt.CheckState.Checked:
-                        val = 1
-                    else:
-                        val = 0
-                elif isinstance(ctrl, QLineEdit):
-                    val = ctrl.text()
+                val = widget_value(ctrl)
 
                 field_idx = None
                 for idx in range(len(self.culv_flds)):
@@ -638,6 +625,9 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
             self.sb_haut2.setValue(self.sb_haut1.value())
 
     def reset_val(self):
+        # The widgets are only updated here, then all the values are written at once
+        self.ctrl_signal_blocked = True
+        attrs = {}
         for fld in self.culv_flds:
             ctrl = fld[2]
             if ctrl:
@@ -654,6 +644,14 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
                     ctrl.setCurrentIndex(0)
                 elif isinstance(ctrl, QCheckBox):
                     ctrl.setCheckState(Qt.CheckState.Unchecked)
+                else:
+                    continue
+                if self.lay_culv is not None:
+                    attrs[self.field_index(fld[0])] = widget_value(ctrl)
+        self.ctrl_signal_blocked = False
+
+        if self.cur_culv_id is not None and attrs:
+            self.write_attributes({self.cur_culv_id: attrs})
 
     def mesh_vertices(self, ft):
         """Vertices of the culvert in the CRS of the mesh, None if the culvert is not valid or cannot be converted."""
@@ -987,6 +985,24 @@ def calculangle(vertices):
     angle2 = segmentAngle(vertices[-2], vertices[-1])
 
     return angle1, angle2
+
+
+def is_bottom_dataset(name):
+    """TELEMAC names (BOTTOM, FOND) and MDAL name of the elevation of the nodes (Bed Elevation)."""
+    return any(key in name.lower() for key in ("fond", "bottom", "bed elevation"))
+
+
+def widget_value(ctrl):
+    """Value of a culvert widget as stored in the layer."""
+    if isinstance(ctrl, (QDoubleSpinBox, QSpinBox)):
+        return ctrl.value()
+    if isinstance(ctrl, QComboBox):
+        return ctrl.currentIndex()
+    if isinstance(ctrl, QCheckBox):
+        return 1 if ctrl.checkState() == Qt.CheckState.Checked else 0
+    if isinstance(ctrl, QLineEdit):
+        return ctrl.text()
+    return None
 
 
 def to_integer(n):

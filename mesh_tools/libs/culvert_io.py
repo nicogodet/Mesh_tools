@@ -41,7 +41,8 @@ def _to_number(value, kind):
 
 def format_value(value, kind) -> str:
     if kind == KIND_STR:
-        return "" if is_null(value) else str(value)
+        # A tab or a line break would split the record
+        return "" if is_null(value) else " ".join(str(value).split())
     return str(_to_number(value, kind))
 
 
@@ -161,6 +162,8 @@ def read_culvert_file(path: str) -> CulvertFile:
 
     tab = "\t" in lines[2]
     headers = _split(lines[2], tab)
+    if not any(headers):
+        raise CulvertFileError("The 3rd line should contain the column names.")
     lower = [h.lower() for h in headers]
     is_uhaina = "x1" in lower
 

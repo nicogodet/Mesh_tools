@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
 
-from qgis.testing import start_app, unittest
+from . import utilities  # noqa: F401 (QGIS application and iface for the docks)  # isort: skip
 
-from mesh_tools.libs.culvert_manager import CulvertManager
-from mesh_tools.libs.mesh_quality import MeshQuality
-from mesh_tools.libs.source_manager import SourceManager
+from qgis.testing import start_app, unittest  # noqa: E402
+
+from mesh_tools.libs.culvert_manager import CulvertManager  # noqa: E402
+from mesh_tools.libs.mesh_quality import MeshQuality  # noqa: E402
+from mesh_tools.libs.source_manager import SourceManager  # noqa: E402
 
 start_app()
 

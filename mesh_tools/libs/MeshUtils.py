@@ -34,6 +34,7 @@ from qgis.core import (
     QgsGeometry,
     QgsLineString,
     QgsMesh,
+    QgsMeshDatasetGroupMetadata,
     QgsMeshDatasetIndex,
     QgsMeshLayer,
     QgsPointXY,
@@ -63,6 +64,10 @@ class MeshUtils:
         if geometry is None or geometry.isNull():
             return []
         return [QgsPointXY(vertex) for vertex in geometry.vertices()]
+
+    @staticmethod
+    def isScalarOnVertices(metadata: QgsMeshDatasetGroupMetadata) -> bool:
+        return metadata.isScalar() and metadata.dataType() == QgsMeshDatasetGroupMetadata.DataType.DataOnVertices
 
     @staticmethod
     def zFromN(mesh: QgsMeshLayer, meshDatasetIndex: QgsMeshDatasetIndex, n: int):

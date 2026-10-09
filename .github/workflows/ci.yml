@@ -8,15 +8,17 @@ on:
       - main
     paths:
       - 'mesh_tools/**'
+      - 'tests/**'
       - '.docker/**'
-      - '.github/ci.yml'
+      - '.github/workflows/ci.yml'
   pull_request:
     branches:
       - main
     paths:
       - 'mesh_tools/**'
+      - 'tests/**'
       - '.docker/**'
-      - '.github/ci.yml'
+      - '.github/workflows/ci.yml'
 
 jobs:
 
@@ -82,7 +84,8 @@ jobs:
       image: qgis/qgis:${{ matrix.qgis }}
     env:
       QT_QPA_PLATFORM: offscreen
-      PYTHONPATH: ${{ github.workspace }}:/usr/share/qgis/python:/usr/share/qgis/python/plugins
+      # The repository root is added by unittest (-t .)
+      PYTHONPATH: /usr/share/qgis/python:/usr/share/qgis/python/plugins
 
     steps:
       - name: Get source code
