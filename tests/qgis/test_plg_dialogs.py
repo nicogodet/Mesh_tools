@@ -4,6 +4,7 @@ from qgis.testing import start_app, unittest
 
 from mesh_tools.libs.culvert_manager import CulvertManager
 from mesh_tools.libs.mesh_quality import MeshQuality
+from mesh_tools.libs.mesh_translation_dlg import MeshTranslation
 from mesh_tools.libs.source_manager import SourceManager
 
 start_app()
@@ -20,6 +21,10 @@ class DialogsTest(unittest.TestCase):
 
     def test_meshquality_dialog(self):
         dlg = MeshQuality()
+        dlg.show()
+
+    def test_mesh_translation_dialog(self):
+        dlg = MeshTranslation()
         dlg.show()
 
 
