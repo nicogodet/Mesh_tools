@@ -20,7 +20,7 @@ from qgis.core import (  # noqa: E402
     QgsVectorLayer,
 )
 from qgis.PyQt.QtCore import QMetaType  # noqa: E402
-from qgis.PyQt.QtWidgets import QFileDialog, QMessageBox  # noqa: E402
+from qgis.PyQt.QtWidgets import QApplication, QFileDialog, QMessageBox  # noqa: E402
 
 from mesh_tools.libs.culvert_fields import FIELDS  # noqa: E402
 from mesh_tools.libs.culvert_io import field_for_header, read_header  # noqa: E402
@@ -648,6 +648,13 @@ class TestPanel(CulvertManagerTestCase):
         for option in (0, 1):
             self.dock.cb_culv_option.setCurrentIndex(option)
             self.assertLessEqual(self.dock.scroll_contents.minimumSizeHint().width(), 360)
+            # fits a side dock on a laptop screen without scrolling
+            self.assertLessEqual(self.dock.scroll_contents.minimumSizeHint().height(), 800)
+        # all the tabs fit without scroll buttons in a 380 px dock
+        self.dock.resize(380, 800)
+        self.dock.show()
+        QApplication.processEvents()
+        self.assertLessEqual(self.dock.tab_culvert.tabBar().sizeHint().width(), self.dock.tab_culvert.width())
 
     def test_status_tells_what_to_do(self):
         self.assertIn("mesh", self.dock.lbl_status.text())

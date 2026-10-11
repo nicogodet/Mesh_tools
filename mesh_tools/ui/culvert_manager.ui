@@ -45,7 +45,7 @@
           <property name="title">
            <string>Layers</string>
           </property>
-          <layout class="QGridLayout" name="lay_layers" columnstretch="0,1,1">
+          <layout class="QGridLayout" name="lay_layers" columnstretch="0,1,0,0">
            <item row="0" column="0">
             <widget class="QLabel" name="lbl_mesh">
              <property name="text">
@@ -53,7 +53,7 @@
              </property>
             </widget>
            </item>
-           <item row="0" column="1" colspan="2">
+           <item row="0" column="1" colspan="3">
             <widget class="QgsMapLayerComboBox" name="cb_lay_mesh">
              <property name="showCrs">
               <bool>true</bool>
@@ -70,7 +70,7 @@
              </property>
             </widget>
            </item>
-           <item row="1" column="1" colspan="2">
+           <item row="1" column="1" colspan="3">
             <widget class="QComboBox" name="cb_dataset_mesh">
              <property name="toolTip">
               <string>Dataset of the mesh giving the automatic elevations Z1 and Z2 (scalar on the nodes, first timestep).</string>
@@ -84,26 +84,33 @@
              </property>
             </widget>
            </item>
-           <item row="2" column="1" colspan="2">
-            <widget class="QComboBox" name="cb_lay_culv"/>
-           </item>
-           <item row="3" column="1">
-            <widget class="QPushButton" name="btn_new_culv_file">
-             <property name="toolTip">
-              <string>Create an empty culvert layer (shapefile or GeoPackage).</string>
-             </property>
-             <property name="text">
-              <string>New layer…</string>
+           <item row="2" column="1">
+            <widget class="QComboBox" name="cb_lay_culv">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+               <horstretch>0</horstretch>
+               <verstretch>0</verstretch>
+              </sizepolicy>
              </property>
             </widget>
            </item>
-           <item row="3" column="2">
-            <widget class="QPushButton" name="btn_import_culv_file">
+           <item row="2" column="2">
+            <widget class="QToolButton" name="btn_new_culv_file">
              <property name="toolTip">
-              <string>Create a culvert layer from a TELEMAC or Uhaina culvert file.</string>
+              <string>New culvert layer (shapefile or GeoPackage)</string>
              </property>
              <property name="text">
-              <string>Import file…</string>
+              <string>New…</string>
+             </property>
+            </widget>
+           </item>
+           <item row="2" column="3">
+            <widget class="QToolButton" name="btn_import_culv_file">
+             <property name="toolTip">
+              <string>Import a TELEMAC or Uhaina culvert file</string>
+             </property>
+             <property name="text">
+              <string>Import…</string>
              </property>
             </widget>
            </item>
@@ -115,7 +122,7 @@
           <property name="title">
            <string>Computation</string>
           </property>
-          <layout class="QGridLayout" name="lay_output" columnstretch="0,1">
+          <layout class="QGridLayout" name="lay_output" columnstretch="0,1,0,0">
            <item row="0" column="0">
             <widget class="QLabel" name="lbl_software">
              <property name="text">
@@ -137,17 +144,17 @@
              </item>
             </widget>
            </item>
-           <item row="1" column="0">
+           <item row="0" column="2">
             <widget class="QLabel" name="lbl_culv_option">
              <property name="toolTip">
               <string>TELEMAC keyword OPTION FOR CULVERTS (1 by default). It is stored in the culvert layer and sets the parameters to fill in.</string>
              </property>
              <property name="text">
-              <string>Culvert option</string>
+              <string>Option</string>
              </property>
             </widget>
            </item>
-           <item row="1" column="1">
+           <item row="0" column="3">
             <widget class="QComboBox" name="cb_culv_option">
              <property name="toolTip">
               <string>TELEMAC keyword OPTION FOR CULVERTS (1 by default). It is stored in the culvert layer and sets the parameters to fill in.</string>
@@ -164,7 +171,7 @@
              </item>
             </widget>
            </item>
-           <item row="2" column="0">
+           <item row="1" column="0">
             <widget class="QLabel" name="lbl_relax">
              <property name="toolTip">
               <string>The relaxation coefficient is initially used to prescribe the discharge in the culvert on a progressive basis in order to avoid the formation of an eddy.
@@ -178,7 +185,7 @@ It is stored in the culvert layer.</string>
              </property>
             </widget>
            </item>
-           <item row="2" column="1">
+           <item row="1" column="1" colspan="3">
             <widget class="QgsDoubleSpinBox" name="sb_relax">
              <property name="toolTip">
               <string>The relaxation coefficient is initially used to prescribe the discharge in the culvert on a progressive basis in order to avoid the formation of an eddy.
@@ -225,6 +232,16 @@ It is stored in the culvert layer.</string>
            <string>Selected culvert</string>
           </property>
           <layout class="QVBoxLayout" name="lay_culvert_form">
+           <item>
+            <widget class="QTabWidget" name="tab_culvert">
+             <property name="documentMode">
+              <bool>true</bool>
+             </property>
+             <property name="usesScrollButtons">
+              <bool>true</bool>
+             </property>
+            </widget>
+           </item>
            <item>
             <widget class="QPushButton" name="btn_res_val">
              <property name="toolTip">
@@ -296,7 +313,7 @@ It is stored in the culvert layer.</string>
           <property name="maximumSize">
            <size>
             <width>16777215</width>
-            <height>120</height>
+            <height>80</height>
            </size>
           </property>
           <property name="readOnly">

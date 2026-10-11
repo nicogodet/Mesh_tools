@@ -32,6 +32,7 @@ from contextlib import suppress
 from qgis.core import (
     NULL,
     Qgis,
+    QgsApplication,
     QgsCsException,
     QgsCoordinateTransform,
     QgsCoordinateTransformContext,
@@ -46,7 +47,7 @@ from qgis.core import (
     QgsVectorFileWriter,
     QgsVectorLayer,
 )
-from qgis.gui import QgsCollapsibleGroupBox, QgsDoubleSpinBox
+from qgis.gui import QgsDoubleSpinBox
 from qgis.PyQt import uic
 from qgis.PyQt.QtCore import QMetaType, Qt, pyqtSignal
 from qgis.PyQt.QtGui import QStandardItem, QStandardItemModel
@@ -61,6 +62,7 @@ from qgis.PyQt.QtWidgets import (
     QListWidgetItem,
     QMessageBox,
     QSpinBox,
+    QWidget,
 )
 
 from ..mesh_tools_dockwidget import MeshToolsDockWidget
@@ -139,6 +141,8 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
 
         self.build_culvert_form()
         self.lst_problems.hide()
+        self.btn_new_culv_file.setIcon(QgsApplication.getThemeIcon("/mActionNewVectorLayer.svg"))
+        self.btn_import_culv_file.setIcon(QgsApplication.getThemeIcon("/mActionFileOpen.svg"))
 
         self.lay_mesh = None
         self.lay_culv = None
@@ -212,33 +216,34 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
             self.culv_lay_changed()
 
     def build_culvert_form(self):
-        """Widgets of the selected culvert, in groups, named after culvert_fields (txt_name, sb_ce1...)."""
+        """Widgets of the selected culvert, one tab per group, named after culvert_fields (txt_name, sb_ce1...)."""
         self.field_rows = {}
         self.form_groups = []
         fields = {fld.name: fld for fld in FIELDS}
-        position = self.lay_culvert_form.indexOf(self.btn_res_val)
-        for title, names in FORM_GROUPS:
-            box = QgsCollapsibleGroupBox(self.tr(title), self.gb_cur_culv)
-            grid = QGridLayout(box)
+        for title, tooltip, names in FORM_GROUPS:
+            page = QWidget(self.tab_culvert)
+            grid = QGridLayout(page)
+            grid.setContentsMargins(4, 4, 4, 4)
+            grid.setVerticalSpacing(4)
             row, col = 0, 0
             for name in names:
                 alias, unit = FIELD_INFO[name]
-                tooltip = f"{name} : {alias}" + (f" ({unit})" if unit else "")
+                field_tooltip = f"{name} : {alias}" + (f" ({unit})" if unit else "")
                 if name in ("N1", "N2"):
                     if name == "N2":
                         continue
-                    label = QLabel(self.tr("Nodes"), box)
-                    self.lbl_nodes = QLabel(box)
+                    label = QLabel(self.tr("Nodes"), page)
+                    self.lbl_nodes = QLabel(page)
                     self.lbl_nodes.setToolTip(self.tr("Nodes N1 and N2 of the extremities, computed from the mesh."))
                     widget = self.lbl_nodes
                 else:
-                    widget = self.make_widget(fields[name], box)
-                    widget.setToolTip(tooltip)
-                    label = None if isinstance(widget, QCheckBox) else QLabel(name, box)
+                    widget = self.make_widget(fields[name], page)
+                    widget.setToolTip(field_tooltip)
+                    label = None if isinstance(widget, QCheckBox) else QLabel(name, page)
                     if label is not None:
-                        label.setToolTip(tooltip)
+                        label.setToolTip(field_tooltip)
 
-                if name == "NAME" or isinstance(widget, QCheckBox) or name == "N1":
+                if name in ("NAME", "N1", "CLAP") or isinstance(widget, QCheckBox):
                     # Whole row
                     if col:
                         row, col = row + 1, 0
@@ -257,9 +262,10 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
                 self.field_rows[name] = (label, widget)
             grid.setColumnStretch(1, 1)
             grid.setColumnStretch(3, 1)
-            self.lay_culvert_form.insertWidget(position, box)
-            position += 1
-            self.form_groups.append((box, names))
+            grid.setRowStretch(row + 1, 1)
+            index = self.tab_culvert.addTab(page, self.tr(title))
+            self.tab_culvert.setTabToolTip(index, self.tr(tooltip))
+            self.form_groups.append((page, names))
 
     def make_widget(self, fld, parent):
         alias, unit = FIELD_INFO[fld.name]
@@ -404,7 +410,7 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
         option = self.cb_culv_option.currentIndex() + 1
         circular = self.cb_circ.isChecked()
         fields = {fld.name: fld for fld in FIELDS}
-        for box, names in self.form_groups:
+        for page, names in self.form_groups:
             any_shown = False
             for name in names:
                 if name not in self.field_rows:
@@ -427,7 +433,7 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
                         item.setVisible(used)
                 widget.setEnabled(True)
                 any_shown = any_shown or used
-            box.setVisible(any_shown)
+            self.tab_culvert.setTabVisible(self.tab_culvert.indexOf(page), any_shown)
 
         # LARG stays visible for circular culverts: it follows the height
         for name, widget_names in AUTOMATIC.items():

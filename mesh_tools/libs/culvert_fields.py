@@ -117,14 +117,20 @@ VALVES = (
     ("3", "Closed (no flow)"),
 )
 
-# Groups of the culvert form: (title, field names)
+# Tabs of the culvert form in the dock: (title, tooltip, field names). Short titles: the dock is narrow
 FORM_GROUPS = (
-    ("Culvert", ("NAME", "N1", "N2", "CLAP", "CIRC", "NB_in_//")),
-    ("Section", ("LARG", "HAUT", "HAUT2", "d1", "d2")),
-    ("Elevations", ("Z1", "Z2", "AZ")),
-    ("Head losses", ("CE1", "CE2", "CS1", "CS2", "L12")),
-    ("Option 2 parameters", ("CV", "C56", "CV5", "C5", "CT", "FRIC", "LENGTH", "AL")),
-    ("Angles", ("a1", "a2", "AA")),
+    (
+        "Culvert",
+        "Name, nodes, valve and section",
+        ("NAME", "N1", "N2", "CLAP", "NB_in_//", "CIRC", "LARG", "HAUT", "HAUT2"),
+    ),
+    ("Levels", "Elevations and angles", ("Z1", "Z2", "AZ", "d1", "d2", "a1", "a2", "AA")),
+    ("Losses", "Head loss coefficients", ("CE1", "CE2", "CS1", "CS2", "L12")),
+    (
+        "Opt. 2",
+        "Parameters used only with the culvert option 2",
+        ("CV", "C56", "CV5", "C5", "CT", "FRIC", "LENGTH", "AL"),
+    ),
 )
 
 
