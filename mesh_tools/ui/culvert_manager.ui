@@ -340,7 +340,7 @@ A relaxation coefficient of 0.2 means that 20% of time T result is mixed with 80
                 <string>The loss coefficient due to the presence of a valve.</string>
                </property>
                <property name="text">
-                <string>CV*</string>
+                <string>CV</string>
                </property>
               </widget>
              </item>
@@ -446,7 +446,7 @@ A relaxation coefficient of 0.2 means that 20% of time T result is mixed with 80
                 <string>The constant used to differentiate flow types 5 and 6 in the formulation by Bodhaine.</string>
                </property>
                <property name="text">
-                <string>C56*</string>
+                <string>C56</string>
                </property>
               </widget>
              </item>
@@ -625,7 +625,7 @@ A relaxation coefficient of 0.2 means that 20% of time T result is mixed with 80
                 <string>CV5 represent correction coefficient to CV coefficient due to the occurrence of the type 5 flow in the Bodhaine formulation.</string>
                </property>
                <property name="text">
-                <string>CV5*</string>
+                <string>CV5</string>
                </property>
               </widget>
              </item>
@@ -701,7 +701,7 @@ A relaxation coefficient of 0.2 means that 20% of time T result is mixed with 80
                 <string>The loss coefficient due to the presence of trash screens.</string>
                </property>
                <property name="text">
-                <string>CT*</string>
+                <string>CT</string>
                </property>
               </widget>
              </item>
@@ -750,7 +750,7 @@ A relaxation coefficient of 0.2 means that 20% of time T result is mixed with 80
                 <string>HAUT2 is the height of the construction work (in meters) at the outlet.</string>
                </property>
                <property name="text">
-                <string>HAUT2*</string>
+                <string>HAUT2</string>
                </property>
               </widget>
              </item>
@@ -760,7 +760,7 @@ A relaxation coefficient of 0.2 means that 20% of time T result is mixed with 80
                 <string>C5 represent correction coefficient to C1 coefficient due to the occurrence of the type 5 flow in the Bodhaine formulation.</string>
                </property>
                <property name="text">
-                <string>C5*</string>
+                <string>C5</string>
                </property>
               </widget>
              </item>
@@ -941,7 +941,7 @@ A relaxation coefficient of 0.2 means that 20% of time T result is mixed with 80
                 <string>The Manning Strikler coefficient.</string>
                </property>
                <property name="text">
-                <string>FRIC*</string>
+                <string>FRIC</string>
                </property>
               </widget>
              </item>
@@ -973,7 +973,7 @@ A relaxation coefficient of 0.2 means that 20% of time T result is mixed with 80
                 <string>The length of the culvert.</string>
                </property>
                <property name="text">
-                <string>LENGTH*</string>
+                <string>LENGTH</string>
                </property>
               </widget>
              </item>
@@ -1071,7 +1071,7 @@ A relaxation coefficient of 0.2 means that 20% of time T result is mixed with 80
              </font>
             </property>
             <property name="text">
-             <string>Parameters with * are only used with keyword OPTION FOR CULVERTS = 2</string>
+             <string>Greyed parameters are not used by the selected software and culvert option</string>
             </property>
            </widget>
           </item>
@@ -1135,6 +1135,30 @@ A relaxation coefficient of 0.2 means that 20% of time T result is mixed with 80
            <string notr="true">Uhaina</string>
           </property>
          </item>
+        </widget>
+       </item>
+       <item row="1" column="0">
+        <widget class="QComboBox" name="cb_culv_option">
+         <property name="toolTip">
+          <string>TELEMAC keyword OPTION FOR CULVERTS (1 by default). It is stored in the culvert layer and sets the parameters to fill in.</string>
+         </property>
+         <item>
+          <property name="text">
+           <string>Option 1</string>
+          </property>
+         </item>
+         <item>
+          <property name="text">
+           <string>Option 2</string>
+          </property>
+         </item>
+        </widget>
+       </item>
+       <item row="1" column="1">
+        <widget class="QLabel" name="lbl_culv_option">
+         <property name="text">
+          <string>OPTION FOR CULVERTS</string>
+         </property>
         </widget>
        </item>
       </layout>

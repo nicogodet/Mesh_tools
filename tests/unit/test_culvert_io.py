@@ -9,6 +9,7 @@ import unittest
 from mesh_tools.libs.culvert_fields import FIELDS, SOFT_TELEMAC, SOFT_UHAINA, exported_fields
 from mesh_tools.libs.culvert_io import (
     CulvertFileError,
+    detect_option,
     field_for_header,
     format_culvert_file,
     parse_value,
@@ -78,6 +79,18 @@ class TestWrite(unittest.TestCase):
         lines = data_lines(format_culvert_file([record(NAME="a\tb\nc")], SOFT_TELEMAC))
         self.assertEqual(len(lines), 4)
         self.assertTrue(lines[3].endswith("\ta b c"))
+
+    def test_unused_empty_fields_are_written_zero(self):
+        empty = {name: None for name in ("CV", "C56", "CV5", "C5", "CT", "FRIC", "LENGTH")}
+        lines = data_lines(format_culvert_file([record(**empty)], SOFT_TELEMAC, option=1))
+        header, values = lines[2].split("\t"), lines[3].split("\t")
+        self.assertEqual(len(header), len(values))
+        for name in empty:
+            self.assertEqual(float(values[header.index(name)]), 0.0, name)
+        with self.assertRaises(CulvertFileError):
+            format_culvert_file([record(L12=None)], SOFT_TELEMAC, option=1)
+        lines = data_lines(format_culvert_file([record(L12=None)], SOFT_TELEMAC, option=2))
+        self.assertEqual(lines[3].split("\t")[lines[2].split("\t").index("L12")], "0.0")
 
     def test_empty_numeric_value_is_an_error(self):
         with self.assertRaises(CulvertFileError):
@@ -201,6 +214,15 @@ class TestRead(unittest.TestCase):
             parse_value("", "float", "CE1")
 
 
+class TestDetectOption(unittest.TestCase):
+    def test_detect(self):
+        columns = {"CV": "CV", "FRIC": "FRIC", "N1": "I1"}
+        self.assertEqual(detect_option([{"CV": "0.0", "FRIC": "0"}], columns), 1)
+        self.assertEqual(detect_option([{"CV": "0.0", "FRIC": "0"}, {"CV": "0", "FRIC": "0.02"}], columns), 2)
+        self.assertEqual(detect_option([{"CV": "x"}], columns), 1)
+        self.assertEqual(detect_option([{"CV": "1"}], {}), 1)
+
+
 class TestValidate(unittest.TestCase):
     def test_valid(self):
         self.assertEqual(validate_record(record()), [])
@@ -212,7 +234,22 @@ class TestValidate(unittest.TestCase):
 
     def test_uhaina_ignores_telemac_only_fields(self):
         self.assertEqual(validate_record(record(CV=None), SOFT_UHAINA), [])
-        self.assertIn(("invalid", "CV"), validate_record(record(CV=None), SOFT_TELEMAC))
+        self.assertIn(("invalid", "CV"), validate_record(record(CV=None), SOFT_TELEMAC, option=2))
+
+    def test_option_1(self):
+        # CV ... LENGTH are not used: may be empty; L12 is used
+        empty = {name: None for name in ("CV", "C56", "CV5", "C5", "CT", "FRIC", "LENGTH")}
+        self.assertEqual(validate_record(record(**empty), SOFT_TELEMAC, option=1), [])
+        self.assertIn(("invalid", "L12"), validate_record(record(L12=None), SOFT_TELEMAC, option=1))
+        # width only needed for a rectangular culvert
+        self.assertEqual(validate_record(record(CIRC=1, LARG=0.0), SOFT_TELEMAC, option=1), [])
+        self.assertIn(("not_positive", "LARG"), validate_record(record(CIRC=0, LARG=0.0), SOFT_TELEMAC, option=1))
+
+    def test_option_2(self):
+        self.assertEqual(validate_record(record(L12=None), SOFT_TELEMAC, option=2), [])
+        self.assertIn(("invalid", "FRIC"), validate_record(record(FRIC=None), SOFT_TELEMAC, option=2))
+        # the hydraulic radius needs a width, even for a circular culvert
+        self.assertIn(("not_positive", "LARG"), validate_record(record(CIRC=1, LARG=0.0), SOFT_TELEMAC, option=2))
 
 
 if __name__ == "__main__":

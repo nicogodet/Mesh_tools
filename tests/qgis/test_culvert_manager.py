@@ -545,6 +545,55 @@ class TestMeshDataset(CulvertManagerTestCase):
         self.assertEqual(self.dock.cb_dataset_mesh.currentText(), "Bed Elevation")
 
 
+class TestCulvertOption(CulvertManagerTestCase):
+    def test_option_stored_in_the_layer_and_greys_widgets(self):
+        self.add_mesh()
+        a = self.add_culvert_layer(os.path.join(self.folder, "a.shp"))
+        b = self.add_culvert_layer(os.path.join(self.folder, "b.shp"))
+        for layer in (a, b):
+            self.add_culvert(layer, CIRC=0)
+        self.assertEqual(self.dock.cb_culv_option.currentIndex(), 0)
+        self.dock.cb_culv_option.setCurrentIndex(1)
+        self.assertEqual(self.dock.culvert_option(b), 2)
+        self.assertEqual(self.dock.culvert_option(a), 1)
+
+        b.selectAll()
+        self.assertTrue(self.dock.sb_fric.isEnabled())
+        self.assertFalse(self.dock.sb_l12.isEnabled())
+        self.dock.cb_lay_culv.setCurrentIndex(self.dock.cb_lay_culv.findData(a.id(), 32))
+        self.assertEqual(self.dock.cb_culv_option.currentIndex(), 0)
+        a.selectAll()
+        self.assertFalse(self.dock.sb_fric.isEnabled())
+        self.assertTrue(self.dock.sb_l12.isEnabled())
+        # Uhaina: no option, its own fields
+        self.dock.cb_software_select.setCurrentIndex(1)
+        self.assertFalse(self.dock.cb_culv_option.isEnabled())
+        self.assertTrue(self.dock.sb_l12.isEnabled())
+        self.assertFalse(self.dock.sb_cv.isEnabled())
+
+    def test_export_with_option_1_accepts_empty_option_2_fields(self):
+        self.add_mesh()
+        layer = self.add_culvert_layer()
+        self.add_culvert(layer, CV=None, FRIC=None, LENGTH=None, AL=0)
+        self.dock.set_culvert_option(layer, 2)
+        self.assertIsNone(self.export(0))  # needed by option 2
+        self.dock.set_culvert_option(layer, 1)
+        lines = self.export(0)
+        self.assertIsNotNone(lines)
+        header, values = lines[2].split("\t"), lines[3].split("\t")
+        self.assertEqual(float(values[header.index("FRIC")]), 0.0)
+
+    def test_import_detects_the_option(self):
+        self.add_mesh()
+        txt = os.path.join(self.folder, "culv.txt")
+        for text, expected in (("c\n0.2 1\nN1\tN2\tFRIC\n1\t3\t0.0\n", 1), ("c\n0.2 1\nN1\tN2\tFRIC\n1\t3\t0.02\n", 2)):
+            with open(txt, "w") as f:
+                f.write(text)
+            layer = self.dock.import_culvert_file(txt, TestImport.items_of(txt), "", QgsCoordinateReferenceSystem(CRS))
+            self.assertEqual(self.dock.culvert_option(layer), expected)
+            self.assertEqual(self.dock.cb_culv_option.currentIndex() + 1, expected)
+
+
 class TestResetValues(CulvertManagerTestCase):
     def test_reset_writes_once(self):
         self.add_mesh()

@@ -9,14 +9,17 @@ from typing import Dict, List, Optional
 
 from .culvert_fields import (
     FIELDS,
+    DEFAULT_OPTION,
     HEADER_ALIASES,
     KIND_FLOAT,
     KIND_INT,
     KIND_INT_TEXT,
     KIND_STR,
+    OPTION_1_UNUSED,
     SOFT_TELEMAC,
     SOFT_UHAINA,
     exported_fields,
+    used_by_option,
 )
 
 
@@ -58,17 +61,35 @@ def is_valid_value(value, kind) -> bool:
     return not (isinstance(number, float) and not math.isfinite(number))
 
 
-def validate_record(record: dict, software: int = SOFT_TELEMAC) -> List[tuple]:
-    """Return a list of (code, field_name), code being 'invalid' or 'not_positive'."""
+def _is_circular(record: dict) -> bool:
+    return not is_null(record.get("CIRC")) and record.get("CIRC") == 1
+
+
+def is_used(name: str, record: dict, software: int, option: int) -> bool:
+    """True if the field is used by the computation (TELEMAC option, Uhaina reads all its columns)."""
+    return software != SOFT_TELEMAC or used_by_option(name, option, _is_circular(record))
+
+
+def validate_record(record: dict, software: int = SOFT_TELEMAC, option: int = DEFAULT_OPTION) -> List[tuple]:
+    """Return a list of (code, field_name), code being 'invalid' or 'not_positive'.
+
+    With TELEMAC, the fields not used by the culvert option may be empty (written as 0).
+    """
     problems = []
     for fld in exported_fields(software):
         if fld.name == "NAME" or fld.name in ("N1", "N2"):
             continue
-        if not is_valid_value(record.get(fld.name), fld.kind):
+        if is_used(fld.name, record, software, option) and not is_valid_value(record.get(fld.name), fld.kind):
             problems.append(("invalid", fld.name))
-    # TELEMAC sets the flow to zero when a height is null
-    if ("invalid", "HAUT") not in problems and float(record["HAUT"]) <= 0:
-        problems.append(("not_positive", "HAUT"))
+
+    # TELEMAC sets the flow to zero when a height is null, and option 2 divides by the hydraulic radius,
+    # which needs a width even for circular culverts
+    positive = ["HAUT"]
+    if software == SOFT_TELEMAC and is_used("LARG", record, software, option):
+        positive.append("LARG")
+    for name in positive:
+        if ("invalid", name) not in problems and float(record[name]) <= 0:
+            problems.append(("not_positive", name))
     return problems
 
 
@@ -86,8 +107,13 @@ def _header_names(software: int) -> List[str]:
     return names
 
 
-def format_culvert_file(records: List[dict], software: int, relax: float = 0.2) -> str:
-    """Text of the culvert file. Uhaina records must have an '_xy' key: (x1, y1, x2, y2)."""
+def format_culvert_file(
+    records: List[dict], software: int, relax: float = 0.2, option: int = DEFAULT_OPTION
+) -> str:
+    """Text of the culvert file. Uhaina records must have an '_xy' key: (x1, y1, x2, y2).
+
+    TELEMAC reads all its columns whatever the culvert option: an empty field not used by the option is written 0.
+    """
     lines = []
     if software == SOFT_TELEMAC:
         lines.append("Relaxation\tCulvert count")
@@ -104,6 +130,8 @@ def format_culvert_file(records: List[dict], software: int, relax: float = 0.2) 
             if fld.name == "HAUT2" and (is_null(value) or value == 0):
                 # In case HAUT2 is empty, suppose it is equal to HAUT
                 value = rec.get("HAUT")
+            elif is_null(value) and fld.kind != KIND_STR and not is_used(fld.name, rec, software, option):
+                value = 0
             if fld.kind != KIND_STR and is_null(value):
                 raise CulvertFileError(f"Culvert {number}: {fld.name} is empty.")
             if software == SOFT_UHAINA and fld.name in ("Z1", "Z2"):
@@ -118,9 +146,11 @@ def format_culvert_file(records: List[dict], software: int, relax: float = 0.2) 
     return "\n".join(lines) + "\n"
 
 
-def write_culvert_file(path: str, records: List[dict], software: int, relax: float = 0.2) -> None:
+def write_culvert_file(
+    path: str, records: List[dict], software: int, relax: float = 0.2, option: int = DEFAULT_OPTION
+) -> None:
     # Format first so nothing is written if a record is wrong
-    text = format_culvert_file(records, software, relax)
+    text = format_culvert_file(records, software, relax, option)
     with open(path, "w", encoding="utf-8", newline="\n") as culv_file:
         culv_file.write(text)
 
@@ -201,6 +231,24 @@ def field_for_header(header: str) -> Optional[str]:
         if fld.name.lower() == key:
             return fld.name
     return None
+
+
+def detect_option(rows: List[Dict[str, str]], columns: Dict[str, str]) -> int:
+    """Culvert option guessed from a file: 2 if a field used only by option 2 has a non-zero value.
+
+    columns maps field names to file columns.
+    """
+    for row in rows:
+        for name in OPTION_1_UNUSED:
+            column = columns.get(name)
+            if not column:
+                continue
+            try:
+                if float(row.get(column, "") or 0) != 0:
+                    return 2
+            except ValueError:
+                continue
+    return DEFAULT_OPTION
 
 
 def parse_value(text: str, kind: str, name: str = ""):

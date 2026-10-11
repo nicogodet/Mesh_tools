@@ -35,6 +35,7 @@ from qgis.core import (
     QgsCsException,
     QgsCoordinateTransform,
     QgsCoordinateTransformContext,
+    QgsExpressionContextUtils,
     QgsFeature,
     QgsField,
     QgsFields,
@@ -58,9 +59,20 @@ from qgis.PyQt.QtWidgets import (
 
 from ..mesh_tools_dockwidget import MeshToolsDockWidget
 from .create_shp_dlg import dlg_create_shapefile
-from .culvert_fields import FIELD_NAMES, FIELDS, KIND_FLOAT, KIND_INT, KIND_INT_TEXT, KIND_STR
+from .culvert_fields import (
+    DEFAULT_OPTION,
+    FIELD_NAMES,
+    FIELDS,
+    KIND_FLOAT,
+    KIND_INT,
+    KIND_INT_TEXT,
+    KIND_STR,
+    SOFT_TELEMAC,
+    used_by_option,
+)
 from .culvert_io import (
     CulvertFileError,
+    detect_option,
     is_null,
     parse_value,
     read_culvert_file,
@@ -74,6 +86,9 @@ from .MeshUtils import MeshUtils
 FORM_CLASS, _ = uic.loadUiType(
     os.path.join(os.path.dirname(__file__), "..", "ui", "culvert_manager.ui")
 )
+
+# Layer variable holding the TELEMAC keyword OPTION FOR CULVERTS
+OPTION_VARIABLE = "culvert_option"
 
 QT_TYPES = {
     KIND_STR: QMetaType.Type.QString,
@@ -143,6 +158,7 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
         self.btn_verif.clicked.connect(self.verif_culvert)
         self.btn_create_file.clicked.connect(self.create_file)
         self.cb_software_select.currentIndexChanged.connect(self.soft_changed)
+        self.cb_culv_option.currentIndexChanged.connect(self.option_changed)
         # self.btn_sel_culv.clicked.connect(self.select_culv)
 
         for fld in self.culv_flds:
@@ -244,10 +260,62 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
 
     def soft_changed(self):
         self.software_select = self.cb_software_select.currentIndex()
-        for fld in self.culv_flds:
-            ctrl = fld[2]
-            if ctrl is not None:
-                ctrl.setEnabled(fld[self.software_select + 3] is not None)
+        self.update_widgets_state()
+
+    def culvert_option(self, layer=None):
+        """OPTION FOR CULVERTS stored in the culvert layer, 1 if not set."""
+        layer = layer or self.lay_culv
+        if layer is None:
+            return DEFAULT_OPTION
+        value = QgsExpressionContextUtils.layerScope(layer).variable(OPTION_VARIABLE)
+        try:
+            return 2 if int(value) == 2 else 1
+        except (TypeError, ValueError):
+            return DEFAULT_OPTION
+
+    def set_culvert_option(self, layer, option):
+        QgsExpressionContextUtils.setLayerVariable(layer, OPTION_VARIABLE, option)
+        if layer is self.lay_culv:
+            self.show_culvert_option()
+
+    def show_culvert_option(self):
+        self.cb_culv_option.blockSignals(True)
+        self.cb_culv_option.setCurrentIndex(self.culvert_option() - 1)
+        self.cb_culv_option.blockSignals(False)
+        self.update_widgets_state()
+
+    def option_changed(self):
+        if self.lay_culv is not None:
+            QgsExpressionContextUtils.setLayerVariable(
+                self.lay_culv, OPTION_VARIABLE, self.cb_culv_option.currentIndex() + 1
+            )
+        self.update_widgets_state()
+
+    def update_widgets_state(self):
+        """Grey the parameters not used by the software and the culvert option, or computed automatically."""
+        telemac = self.software_select == SOFT_TELEMAC
+        option = self.cb_culv_option.currentIndex() + 1
+        circular = self.cb_circ.isChecked()
+        for fld in FIELDS:
+            if fld.widget is None:
+                continue
+            used = fld.col(self.software_select) is not None
+            if telemac:
+                used = used and used_by_option(fld.name, option, circular)
+            getattr(self, fld.widget).setEnabled(used)
+
+        for checkbox, widgets in (
+            (self.cb_auto_z, (self.sb_z1, self.sb_z2)),
+            (self.cb_auto_a, (self.sb_a1, self.sb_a2)),
+            (self.cb_auto_l, (self.sb_length,)),
+            (self.cb_circ, (self.sb_larg,)),
+        ):
+            if checkbox.isChecked():
+                for widget in widgets:
+                    widget.setEnabled(False)
+
+        self.cb_culv_option.setEnabled(telemac)
+        self.lbl_culv_option.setEnabled(telemac)
 
     ######################################################################################
     #                                                                                    #
@@ -442,6 +510,7 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
             self.lay_culv.editingStopped.connect(self.cur_culv_changed)
             self.lay_culv.crsChanged.connect(self.culv_crs_changed)
             self.update_transforms()
+            self.show_culvert_option()
         else:
             self.lay_culv = None
             self.update_transforms()
@@ -498,6 +567,7 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
                 elif isinstance(ctrl, QLineEdit):
                     ctrl.setText("")
         self.ctrl_signal_blocked = False
+        self.update_widgets_state()
 
     def fill_info(self):
         self.ctrl_signal_blocked = True
@@ -506,6 +576,7 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
             if fld[2]:
                 self.display_info(fld[2], ft[fld[0]])
         self.ctrl_signal_blocked = False
+        self.update_widgets_state()
 
     def display_info(self, ctrl, val):
         if isinstance(ctrl, QDoubleSpinBox):
@@ -594,8 +665,7 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
             values = {}
 
         if self.sender() == self.cb_auto_z:
-            self.sb_z1.setEnabled(not self.cb_auto_z.isChecked())
-            self.sb_z2.setEnabled(not self.cb_auto_z.isChecked())
+            self.update_widgets_state()
             if ft is not None:
                 nodes = {self.field_index(name): values[name] for name in ("N1", "N2") if values.get(name) is not None}
                 self.write_attributes({self.cur_culv_id: nodes})
@@ -604,19 +674,18 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
                         spinbox.setValue(values[name])
 
         if self.sender() == self.cb_auto_a:
-            self.sb_a1.setEnabled(not self.cb_auto_a.isChecked())
-            self.sb_a2.setEnabled(not self.cb_auto_a.isChecked())
+            self.update_widgets_state()
             if "a1" in values:
                 self.sb_a1.setValue(values["a1"])
                 self.sb_a2.setValue(values["a2"])
 
         if self.sender() == self.cb_auto_l:
-            self.sb_length.setEnabled(not self.cb_auto_l.isChecked())
+            self.update_widgets_state()
             if "LENGTH" in values:
                 self.sb_length.setValue(values["LENGTH"])
 
         if self.sender() == self.cb_circ:
-            self.sb_larg.setEnabled(not self.cb_circ.isChecked())
+            self.update_widgets_state()
             if ft and (self.cb_circ.isChecked()):
                 self.sb_larg.setValue(self.sb_haut1.value())
                 self.sb_haut2.setValue(self.sb_haut1.value())
@@ -796,7 +865,9 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
             return
 
         try:
-            write_culvert_file(culv_file_name, records, self.software_select, self.sb_relax.value())
+            write_culvert_file(
+                culv_file_name, records, self.software_select, self.sb_relax.value(), self.culvert_option()
+            )
         except (CulvertFileError, OSError) as err:
             self.writeError(self.tr("Error during culvert file creation : {}").format(err))
             return
@@ -822,7 +893,7 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
             record.update(values)
             problems += [[name, error] for error in errors]
 
-            for code, field_name in validate_record(record, self.software_select):
+            for code, field_name in validate_record(record, self.software_select, self.culvert_option()):
                 if code == "not_positive":
                     problems.append([name, self.tr("{} value must be strictly positive.").format(field_name)])
                 else:
@@ -956,6 +1027,11 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
 
         if culv_file.relax is not None:
             self.sb_relax.setValue(culv_file.relax)
+
+        columns = {fld[0]: items[fld[0].lower()][1] for fld in self.culv_flds}
+        option = detect_option(culv_file.rows, columns)
+        self.set_culvert_option(layer, option)
+        self.writeInfo(self.tr("Culvert option set to {} for the imported layer.").format(option))
 
         if rejected:
             self.writeWarning(

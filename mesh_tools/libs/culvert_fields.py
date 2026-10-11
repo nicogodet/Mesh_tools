@@ -76,6 +76,21 @@ HEADER_ALIASES = {
 }
 
 
+# TELEMAC keyword OPTION FOR CULVERTS (1 by default): fields read in the file but not used by the computation
+# (telemac2d buse.f). The file format is the same for both options.
+OPTION_1_UNUSED = frozenset({"CV", "C56", "CV5", "C5", "CT", "FRIC", "LENGTH"})
+OPTION_2_UNUSED = frozenset({"L12"})
+DEFAULT_OPTION = 1
+
+
+def used_by_option(name: str, option: int, circular: bool = False) -> bool:
+    """True if the field is used by the TELEMAC computation with this culvert option."""
+    if option == 2:
+        return name not in OPTION_2_UNUSED
+    # Option 1 does not use the width of circular culverts
+    return name not in OPTION_1_UNUSED and not (name == "LARG" and circular)
+
+
 def exported_fields(software: int):
     """Fields written in the culvert file, in column order."""
     return sorted((f for f in FIELDS if f.col(software) is not None), key=lambda f: f.col(software))
