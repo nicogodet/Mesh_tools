@@ -23,16 +23,18 @@
  ***************************************************************************/
 """
 import functools
+import math
 
 from typing import Optional
 
 from qgis.core import (
-    Qgis,
     QgsCoordinateTransform,
+    QgsCsException,
     QgsFeature,
     QgsGeometry,
     QgsLineString,
     QgsMesh,
+    QgsMeshDatasetGroupMetadata,
     QgsMeshDatasetIndex,
     QgsMeshLayer,
     QgsPointXY,
@@ -44,27 +46,6 @@ from qgis.PyQt.QtWidgets import QApplication
 
 
 class MeshUtils:
-    @staticmethod
-    def pointInMesh(mesh: QgsMeshLayer, point: QgsPointXY) -> bool:
-        return not mesh.snapOnElement(QgsMesh.ElementType.Face, point, 0).isEmpty()
-
-    @staticmethod
-    def findNearestVertex(
-        mesh: QgsMeshLayer, vertexSpatialIndex: QgsSpatialIndex, point: QgsPointXY, xform: QgsCoordinateTransform
-    ):
-        error = None
-        vertexIndex = None
-
-        x_point = xform.transform(point)
-
-        if not MeshUtils.pointInMesh(mesh, point):
-            error = MeshUtils.tr("The point is not within the mesh.")
-            return vertexIndex, error
-
-        vertexIndex = vertexSpatialIndex.nearestNeighbor(x_point, 1)[0]
-
-        return vertexIndex + 1, error
-
     @staticmethod
     def findVerticesInGeometry(
         nativeMesh: QgsMesh, vertexSpatialIndex: QgsSpatialIndex, xform: QgsCoordinateTransform, geometry: QgsGeometry
@@ -78,31 +59,28 @@ class MeshUtils:
         return vertices
 
     @staticmethod
-    def n1n2FromFeature(
-        mesh: QgsMeshLayer, vertexSpatialIndex: QgsSpatialIndex, feat: QgsFeature, xform: QgsCoordinateTransform
-    ):
-        error = None
-        n = [None, None]
+    def lineVertices(geometry: QgsGeometry) -> list:
+        """Vertices of a LineString or MultiLineString, in order."""
+        if geometry is None or geometry.isNull():
+            return []
+        return [QgsPointXY(vertex) for vertex in geometry.vertices()]
 
-        points = feat.geometry().asMultiPolyline()
-        for p in (0, -1):
-            point = points[p][p]
-
-            n[p], err = MeshUtils.findNearestVertex(mesh, vertexSpatialIndex, point, xform)
-
-            if err is not None:
-                error = err
-
-        return n, error
+    @staticmethod
+    def isScalarOnVertices(metadata: QgsMeshDatasetGroupMetadata) -> bool:
+        return metadata.isScalar() and metadata.dataType() == QgsMeshDatasetGroupMetadata.DataType.DataOnVertices
 
     @staticmethod
     def zFromN(mesh: QgsMeshLayer, meshDatasetIndex: QgsMeshDatasetIndex, n: int):
-        dset_val = mesh.dataProvider().datasetValue(meshDatasetIndex, n - 1)
+        """Value of a scalar dataset at node n rounded to 0.01, None if there is no value."""
+        value = mesh.dataProvider().datasetValue(meshDatasetIndex, n - 1).scalar()
+        if not math.isfinite(value):
+            return None
 
-        return round(dset_val.scalar(), 2)
+        return round(value, 2)
 
     @staticmethod
-    def xyFromN(nativeMesh: QgsMesh, n: int, mesh_xorm: QgsCoordinateTransform, layer_xform: QgsCoordinateTransform):
+    def xyFromN(nativeMesh: QgsMesh, n: int, xform: Optional[QgsCoordinateTransform] = None):
+        """Point of the node n, transformed with xform (mesh CRS to another CRS) if given."""
         error = None
         point = None
 
@@ -110,13 +88,18 @@ class MeshUtils:
             error = MeshUtils.tr("N should a strict positive integer.")
             return point, error
 
+        if n > nativeMesh.vertexCount():
+            error = MeshUtils.tr("N is greater than the number of mesh vertices.")
+            return point, error
+
         point = QgsPointXY(nativeMesh.vertex(n - 1))
 
-        # It's safer to transform mesh point to canvas CRS then reverse transform
-        # to layer CRS.
-        if mesh_xorm is not None and layer_xform is not None:
-            point = mesh_xorm.transform(point)
-            point = layer_xform.transform(point, Qgis.TransformDirection.Reverse)
+        if xform is not None:
+            try:
+                point = xform.transform(point)
+            except QgsCsException:
+                point = None
+                error = MeshUtils.tr("The node coordinates cannot be converted to the CRS of the layer.")
 
         return point, error
 
@@ -126,7 +109,7 @@ class MeshUtils:
 
         count = nativeMesh.vertexCount()
         offset = 0
-        batch_size = 10
+        batch_size = 10000
         while offset < count:
             lst_ft = list()
             iterations = min(batch_size, count - offset)

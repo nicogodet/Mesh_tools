@@ -8,15 +8,17 @@ on:
       - main
     paths:
       - 'mesh_tools/**'
+      - 'tests/**'
       - '.docker/**'
-      - '.github/ci.yml'
+      - '.github/workflows/ci.yml'
   pull_request:
     branches:
       - main
     paths:
       - 'mesh_tools/**'
+      - 'tests/**'
       - '.docker/**'
-      - '.github/ci.yml'
+      - '.github/workflows/ci.yml'
 
 jobs:
 
@@ -72,8 +74,28 @@ jobs:
       - name: Run Unit tests
         run: pytest tests/unit/
 
+  tests-qgis:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        qgis: ["3.44", "4.2"]
+    container:
+      image: qgis/qgis:${{ matrix.qgis }}
+    env:
+      QT_QPA_PLATFORM: offscreen
+      # The repository root is added by unittest (-t .)
+      PYTHONPATH: /usr/share/qgis/python:/usr/share/qgis/python/plugins
+
+    steps:
+      - name: Get source code
+        uses: actions/checkout@v6
+
+      - name: Run QGIS tests
+        run: python3 -m unittest discover -s tests/qgis -t . -p "test_*.py"
+
   release:
-    needs: [flake8, tests-unit]
+    needs: [flake8, tests-unit, tests-qgis]
 
     runs-on: ubuntu-latest
     if: github.repository_owner == 'Artelia' && contains(github.ref, 'refs/tags/')

@@ -23,7 +23,7 @@ repository=https://github.com/Artelia/mesh_tools
 
 # Recommended items:
 
-hasProcessingProvider=no
+hasProcessingProvider=yes
 # Uncomment the following line and add your changelog:
 changelog=
    0.9.0 : QGIS 4 compatibility
