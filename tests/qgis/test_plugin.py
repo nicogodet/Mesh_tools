@@ -9,6 +9,11 @@ from qgis.core import QgsApplication, QgsExpression  # noqa: E402
 
 class TestPlugin(unittest.TestCase):
     def test_load_run_unload(self):
+        # Another test module may have registered the provider already
+        registry = QgsApplication.processingRegistry()
+        previous = registry.providerById("meshtools")
+        if previous is not None:
+            registry.removeProvider(previous)
         plugin = load_plugin()
         self.assertIsNotNone(QgsApplication.processingRegistry().providerById("meshtools"))
         self.assertTrue(QgsExpression.isFunctionName("mesh_vertex_index"))

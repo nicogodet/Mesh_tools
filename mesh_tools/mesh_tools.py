@@ -168,8 +168,10 @@ class MeshTools:
         # Called by QGIS for qgis_process, and by initGui
         if self.provider is not None:
             return
-        self.provider = MeshToolsProvider()
-        QgsApplication.processingRegistry().addProvider(self.provider)
+        provider = MeshToolsProvider()
+        # The registry deletes a provider it refuses (same id already registered)
+        if QgsApplication.processingRegistry().addProvider(provider):
+            self.provider = provider
 
     def initGui(self):
         """Create the menu entries and toolbar icons inside the QGIS GUI."""
