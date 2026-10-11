@@ -85,7 +85,7 @@ class TestCulvertProcessing(unittest.TestCase):
         self.assertEqual((result["IMPORTED"], result["REJECTED"], result["OPTION"]), (1, 0, 1))
         self.assertAlmostEqual(result["RELAXATION"], 0.2)
         ft = next(layer.getFeatures())
-        self.assertEqual((ft["N1"], ft["N2"]), (198, 661))
+        self.assertEqual((ft["I1"], ft["I2"]), (198, 661))
 
         check = self.run_alg("checkculverts", INPUT=layer, MESH=self.mesh, SOFTWARE=0, OPTION=1)
         self.assertEqual(check["PROBLEMS"], 0)
@@ -96,13 +96,13 @@ class TestCulvertProcessing(unittest.TestCase):
             lines = f.read().splitlines()
         self.assertEqual(lines[1], "0.3\t1")
         header, values = lines[2].split("\t"), lines[3].split("\t")
-        self.assertEqual((values[header.index("N1")], values[header.index("N2")]), ("198", "661"))
+        self.assertEqual((values[header.index("I1")], values[header.index("I2")]), ("198", "661"))
 
     def test_problems_are_reported_and_export_refused(self):
         layer = culvert_core.memory_culvert_layer(QgsCoordinateReferenceSystem(CRS))
         feature = QgsFeature(layer.fields())
         feature["NAME"] = "bad"
-        feature["HAUT"] = 0.0
+        feature["HAUT1"] = 0.0
         feature.setGeometry(QgsGeometry.fromWkt("MultiLineString((10 5, 900 500))"))
         layer.dataProvider().addFeatures([feature])
         self.project.addMapLayer(layer)

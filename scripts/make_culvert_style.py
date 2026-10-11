@@ -52,23 +52,23 @@ LARG_USED = f'({OPTION_2} OR coalesce("CIRC", 0) = 0)'
 
 # fmt: off
 DEFAULTS = {
-    "d1": "0", "d2": "0", "CE1": "0.5", "CE2": "0.5", "CS1": "1.0", "CS2": "1.0", "LARG": "0", "HAUT": "0",
-    "CLAP": "'0'", "L12": "1.0", "Z1": "0", "Z2": "0", "a1": "0", "a2": "0", "CV": "0", "C56": "0",
+    "D1": "0", "D2": "0", "CE1": "0.5", "CE2": "0.5", "CS1": "1.0", "CS2": "1.0", "LRG": "0", "HAUT1": "0",
+    "CLP": "0", "LBUS": "1.0", "Z1": "0", "Z2": "0", "A1": "0", "A2": "0", "CV": "0", "C56": "0",
     "CV5": "0", "C5": "0", "CT": "0", "HAUT2": "0", "FRIC": "0", "LENGTH": "0", "CIRC": "0", "AL": "0",
     "AZ": "0", "AA": "0", "NB_in_//": "1",
 }
 
 FORM = [
-    ("Culvert", None, ["NAME", "N1", "N2", "CLAP", "CIRC", "NB_in_//"]),
-    ("Elevations and section", None, ["Z1", "Z2", "AZ", "LARG", "HAUT", "HAUT2", "d1", "d2"]),
-    ("Angles", None, ["a1", "a2", "AA"]),
+    ("Culvert", None, ["NAME", "I1", "I2", "CLP", "CIRC", "NB_in_//"]),
+    ("Elevations and section", None, ["Z1", "Z2", "AZ", "LRG", "HAUT1", "HAUT2", "D1", "D2"]),
+    ("Angles", None, ["A1", "A2", "AA"]),
     ("Head losses", None, ["CE1", "CE2", "CS1", "CS2"]),
-    ("Option 1", f"NOT ({OPTION_2})", ["L12"]),
+    ("Option 1", f"NOT ({OPTION_2})", ["LBUS"]),
     ("Option 2", OPTION_2, ["CV", "C56", "CV5", "C5", "CT", "FRIC", "LENGTH", "AL"]),
 ]
 # fmt: on
 
-INVALID = '"N1" IS NULL OR "N2" IS NULL OR coalesce("HAUT", 0) <= 0'
+INVALID = '"I1" IS NULL OR "I2" IS NULL OR coalesce("HAUT1", 0) <= 0'
 
 # Automatic values, updated whenever a culvert is modified. The mesh functions come from the Mesh Tools plugin:
 # they are called through eval() so that without the plugin the stored value is kept (eval gives NULL).
@@ -92,21 +92,21 @@ def angle(first, second):
 
 
 AUTOMATIC_DEFAULTS = {
-    "N1": node_expression("N1", "start_point"),
-    "N2": node_expression("N2", "end_point"),
+    "I1": node_expression("I1", "start_point"),
+    "I2": node_expression("I2", "end_point"),
     "Z1": elevation_expression("Z1", "start_point"),
     "Z2": elevation_expression("Z2", "end_point"),
     "LENGTH": f'if("AL" = 1, coalesce(length({IN_MESH_CRS}), "LENGTH"), "LENGTH")',
-    "a1": (
+    "A1": (
         f"if(\"AA\" = 1, coalesce(with_variable('g', {IN_MESH_CRS}, "
-        f"({angle('point_n(@g, 1)', 'point_n(@g, 2)')} + 180) % 360), \"a1\"), \"a1\")"
+        f"({angle('point_n(@g, 1)', 'point_n(@g, 2)')} + 180) % 360), \"A1\"), \"A1\")"
     ),
-    "a2": (
+    "A2": (
         f"if(\"AA\" = 1, coalesce(with_variable('g', {IN_MESH_CRS}, "
-        f"{angle('point_n(@g, num_points(@g) - 1)', 'point_n(@g, num_points(@g))')}), \"a2\"), \"a2\")"
+        f"{angle('point_n(@g, num_points(@g) - 1)', 'point_n(@g, num_points(@g))')}), \"A2\"), \"A2\")"
     ),
     # A circular culvert is as wide as high
-    "LARG": 'if("CIRC" = 1, "HAUT", "LARG")',
+    "LRG": 'if("CIRC" = 1, "HAUT1", "LRG")',
 }
 
 # Fields computed when the automatic option is checked: not editable then
@@ -114,9 +114,9 @@ EDITABLE = {
     "Z1": '"AZ" IS NULL OR "AZ" != 1',
     "Z2": '"AZ" IS NULL OR "AZ" != 1',
     "LENGTH": '"AL" IS NULL OR "AL" != 1',
-    "a1": '"AA" IS NULL OR "AA" != 1',
-    "a2": '"AA" IS NULL OR "AA" != 1',
-    "LARG": '"CIRC" IS NULL OR "CIRC" != 1',
+    "A1": '"AA" IS NULL OR "AA" != 1',
+    "A2": '"AA" IS NULL OR "AA" != 1',
+    "LRG": '"CIRC" IS NULL OR "CIRC" != 1',
 }
 
 
@@ -157,7 +157,7 @@ def renderer():
     add_center_marker(symbols["3"], "line", 0)
     for value, label in VALVES:
         root.appendChild(
-            QgsRuleBasedRenderer.Rule(symbols[value], 0, 0, f"NOT ({INVALID}) AND to_int(\"CLAP\") = {value}", label)
+            QgsRuleBasedRenderer.Rule(symbols[value], 0, 0, f"NOT ({INVALID}) AND to_int(\"CLP\") = {value}", label)
         )
     other = QgsRuleBasedRenderer.Rule(line_symbol(BLUE), 0, 0, "", "Other")
     other.setIsElse(True)
@@ -167,19 +167,19 @@ def renderer():
 
 def constraint(name):
     """(expression, description) of the soft constraint of a field, None if it has none."""
-    if name in ("NAME", "N1", "N2"):
+    if name in ("NAME", "I1", "I2"):
         return None
-    if name == "HAUT":
-        return 'coalesce("HAUT", 0) > 0', "The height must be greater than 0."
-    if name == "LARG":
+    if name == "HAUT1":
+        return 'coalesce("HAUT1", 0) > 0', "The height must be greater than 0."
+    if name == "LRG":
         return (
-            f'NOT {LARG_USED} OR coalesce("LARG", 0) > 0',
+            f'NOT {LARG_USED} OR coalesce("LRG", 0) > 0',
             "The width must be greater than 0 (rectangular culvert or option 2).",
         )
     if name in OPTION_1_UNUSED:
         return f'NOT ({OPTION_2}) OR "{name}" IS NOT NULL', "Required with culvert option 2."
-    if name == "L12":
-        return f'{OPTION_2} OR "L12" IS NOT NULL', "Required with culvert option 1."
+    if name == "LBUS":
+        return f'{OPTION_2} OR "LBUS" IS NOT NULL', "Required with culvert option 1."
     return f'"{name}" IS NOT NULL', "Required."
 
 
@@ -200,7 +200,7 @@ def main(path):
             layer.setDefaultValueDefinition(idx, QgsDefaultValue(AUTOMATIC_DEFAULTS[fld.name], True))
         elif fld.name in DEFAULTS:
             layer.setDefaultValueDefinition(idx, QgsDefaultValue(DEFAULTS[fld.name]))
-        if fld.name == "CLAP":
+        if fld.name == "CLP":
             layer.setEditorWidgetSetup(idx, QgsEditorWidgetSetup("ValueMap", {"map": [{lab: v} for v, lab in VALVES]}))
         elif fld.name in ("CIRC", "AA", "AL", "AZ"):
             layer.setEditorWidgetSetup(
@@ -226,7 +226,7 @@ def main(path):
         for name in names:
             box.addChildElement(QgsAttributeEditorField(name, fields.lookupField(name), box))
         form.addTab(box)
-    for name in ("N1", "N2"):
+    for name in ("I1", "I2"):
         form.setReadOnly(fields.lookupField(name), True)
     for name, expression in EDITABLE.items():
         properties = QgsPropertyCollection()

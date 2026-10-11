@@ -24,12 +24,12 @@ KIND = {f.name: f.kind for f in FIELDS}
 
 def record(**kwargs):
     rec = {
-        "NAME": "culvert 1", "N1": 1, "N2": 2,
+        "NAME": "culvert 1", "I1": 1, "I2": 2,
         "CE1": 0.5, "CE2": 0.5, "CS1": 1.0, "CS2": 1.0,
-        "LARG": 1.2, "HAUT": 1.2, "CLAP": "0", "L12": 1.0, "Z1": 10.0, "Z2": 9.5,
+        "LRG": 1.2, "HAUT1": 1.2, "CLP": 0, "LBUS": 1.0, "Z1": 10.0, "Z2": 9.5,
         "CV": 0.0, "C56": 0.0, "CV5": 0.0, "C5": 0.0, "CT": 0.0,
         "HAUT2": 0.0, "FRIC": 0.0, "LENGTH": 12.5, "CIRC": 1,
-        "d1": 90.0, "d2": 90.0, "a1": 0.0, "a2": 180.0,
+        "D1": 90.0, "D2": 90.0, "A1": 0.0, "A2": 180.0,
         "AA": 1, "NB_in_//": 1, "AL": 1, "AZ": 0,
         "_xy": (0.0, 0.0, 100.0, 50.0),
     }  # fmt: skip
@@ -53,15 +53,15 @@ class TestWrite(unittest.TestCase):
         self.assertEqual(lines[1], "0.2\t1")
 
     def test_haut2_zero_replaced_by_haut_once(self):
-        lines = data_lines(format_culvert_file([record(HAUT=1.5, HAUT2=0.0)], SOFT_TELEMAC))
+        lines = data_lines(format_culvert_file([record(HAUT1=1.5, HAUT2=0.0)], SOFT_TELEMAC))
         header, values = lines[2].split("\t"), lines[3].split("\t")
         self.assertEqual(values[header.index("HAUT2")], "1.5")
         self.assertEqual(values[header.index("LENGTH")], "12.5")
 
     def test_integer_flags_are_integers(self):
-        lines = data_lines(format_culvert_file([record(CLAP="2", CIRC=0)], SOFT_TELEMAC))
+        lines = data_lines(format_culvert_file([record(CLP=2, CIRC=0)], SOFT_TELEMAC))
         header, values = lines[2].split("\t"), lines[3].split("\t")
-        for name in ("N1", "N2", "CLAP", "CIRC", "AA"):
+        for name in ("I1", "I2", "CLP", "CIRC", "AA"):
             self.assertEqual(values[header.index(name)], str(int(values[header.index(name)])), name)
 
     def test_empty_name_and_null_text(self):
@@ -88,9 +88,9 @@ class TestWrite(unittest.TestCase):
         for name in empty:
             self.assertEqual(float(values[header.index(name)]), 0.0, name)
         with self.assertRaises(CulvertFileError):
-            format_culvert_file([record(L12=None)], SOFT_TELEMAC, option=1)
-        lines = data_lines(format_culvert_file([record(L12=None)], SOFT_TELEMAC, option=2))
-        self.assertEqual(lines[3].split("\t")[lines[2].split("\t").index("L12")], "0.0")
+            format_culvert_file([record(LBUS=None)], SOFT_TELEMAC, option=1)
+        lines = data_lines(format_culvert_file([record(LBUS=None)], SOFT_TELEMAC, option=2))
+        self.assertEqual(lines[3].split("\t")[lines[2].split("\t").index("LBUS")], "0.0")
 
     def test_empty_numeric_value_is_an_error(self):
         with self.assertRaises(CulvertFileError):
@@ -109,12 +109,12 @@ class TestWrite(unittest.TestCase):
         folder = tempfile.mkdtemp()
         try:
             path = os.path.join(folder, "culv.txt")
-            write_culvert_file(path, [record(), record(NAME="second one", N1=3, N2=4)], SOFT_TELEMAC, 0.3)
+            write_culvert_file(path, [record(), record(NAME="second one", I1=3, I2=4)], SOFT_TELEMAC, 0.3)
             read = read_culvert_file(path)
             self.assertEqual(read.relax, 0.3)
             self.assertEqual(len(read.rows), 2)
             self.assertEqual(read.rows[1]["NAME"], "second one")
-            self.assertEqual(parse_value(read.rows[1]["N2"], KIND["N2"], "N2"), 4)
+            self.assertEqual(parse_value(read.rows[1]["I2"], KIND["I2"], "I2"), 4)
             self.assertEqual(parse_value(read.rows[0]["LENGTH"], KIND["LENGTH"], "LENGTH"), 12.5)
         finally:
             shutil.rmtree(folder)
@@ -165,15 +165,15 @@ class TestRead(unittest.TestCase):
         )
         headers = read_header(path)
         self.assertEqual(len(headers), 26)
-        self.assertEqual([field_for_header(h) for h in headers[:2]], ["N1", "N2"])
-        self.assertEqual(field_for_header("LRG"), "LARG")
-        self.assertEqual(field_for_header("LBUS"), "L12")
-        self.assertEqual(field_for_header("D1"), "d1")
+        self.assertEqual([field_for_header(h) for h in headers[:2]], ["I1", "I2"])
+        self.assertEqual(field_for_header("LRG"), "LRG")
+        self.assertEqual(field_for_header("LBUS"), "LBUS")
+        self.assertEqual(field_for_header("D1"), "D1")
         self.assertIsNone(field_for_header("whatever"))
         read = read_culvert_file(path)
         self.assertEqual(read.relax, 0.2)
         self.assertEqual(read.rows[0]["I2"], "661")
-        self.assertEqual(parse_value(read.rows[0]["D1"], KIND["d1"], "d1"), 90.0)
+        self.assertEqual(parse_value(read.rows[0]["D1"], KIND["D1"], "D1"), 90.0)
 
     def test_trailing_blank_lines_and_old_format(self):
         path = self.write("comment\n0.5\nN1\tN2\n1\t2\n\n   \n")
@@ -205,18 +205,18 @@ class TestRead(unittest.TestCase):
         self.assertEqual(parse_value("-1.2", "float"), -1.2)
         self.assertEqual(parse_value("1e-3", "float"), 0.001)
         self.assertEqual(parse_value("90.", "int"), 90)
-        self.assertEqual(parse_value("1", "int_text"), "1")
+        self.assertEqual(parse_value("1", "int"), 1)
         with self.assertRaises(CulvertFileError):
             parse_value("abc", "float", "CE1")
         with self.assertRaises(CulvertFileError):
-            parse_value("1.5", "int", "N1")
+            parse_value("1.5", "int", "I1")
         with self.assertRaises(CulvertFileError):
             parse_value("", "float", "CE1")
 
 
 class TestDetectOption(unittest.TestCase):
     def test_detect(self):
-        columns = {"CV": "CV", "FRIC": "FRIC", "N1": "I1"}
+        columns = {"CV": "CV", "FRIC": "FRIC", "I1": "I1"}
         self.assertEqual(detect_option([{"CV": "0.0", "FRIC": "0"}], columns), 1)
         self.assertEqual(detect_option([{"CV": "0.0", "FRIC": "0"}, {"CV": "0", "FRIC": "0.02"}], columns), 2)
         self.assertEqual(detect_option([{"CV": "x"}], columns), 1)
@@ -228,9 +228,9 @@ class TestValidate(unittest.TestCase):
         self.assertEqual(validate_record(record()), [])
 
     def test_null_and_zero_height(self):
-        problems = validate_record(record(CE1=None, HAUT=0.0))
+        problems = validate_record(record(CE1=None, HAUT1=0.0))
         self.assertIn(("invalid", "CE1"), problems)
-        self.assertIn(("not_positive", "HAUT"), problems)
+        self.assertIn(("not_positive", "HAUT1"), problems)
 
     def test_uhaina_ignores_telemac_only_fields(self):
         self.assertEqual(validate_record(record(CV=None), SOFT_UHAINA), [])
@@ -240,16 +240,16 @@ class TestValidate(unittest.TestCase):
         # CV ... LENGTH are not used: may be empty; L12 is used
         empty = {name: None for name in ("CV", "C56", "CV5", "C5", "CT", "FRIC", "LENGTH")}
         self.assertEqual(validate_record(record(**empty), SOFT_TELEMAC, option=1), [])
-        self.assertIn(("invalid", "L12"), validate_record(record(L12=None), SOFT_TELEMAC, option=1))
+        self.assertIn(("invalid", "LBUS"), validate_record(record(LBUS=None), SOFT_TELEMAC, option=1))
         # width only needed for a rectangular culvert
-        self.assertEqual(validate_record(record(CIRC=1, LARG=0.0), SOFT_TELEMAC, option=1), [])
-        self.assertIn(("not_positive", "LARG"), validate_record(record(CIRC=0, LARG=0.0), SOFT_TELEMAC, option=1))
+        self.assertEqual(validate_record(record(CIRC=1, LRG=0.0), SOFT_TELEMAC, option=1), [])
+        self.assertIn(("not_positive", "LRG"), validate_record(record(CIRC=0, LRG=0.0), SOFT_TELEMAC, option=1))
 
     def test_option_2(self):
-        self.assertEqual(validate_record(record(L12=None), SOFT_TELEMAC, option=2), [])
+        self.assertEqual(validate_record(record(LBUS=None), SOFT_TELEMAC, option=2), [])
         self.assertIn(("invalid", "FRIC"), validate_record(record(FRIC=None), SOFT_TELEMAC, option=2))
         # the hydraulic radius needs a width, even for a circular culvert
-        self.assertIn(("not_positive", "LARG"), validate_record(record(CIRC=1, LARG=0.0), SOFT_TELEMAC, option=2))
+        self.assertIn(("not_positive", "LRG"), validate_record(record(CIRC=1, LRG=0.0), SOFT_TELEMAC, option=2))
 
 
 if __name__ == "__main__":

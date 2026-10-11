@@ -101,11 +101,11 @@ class CulvertManagerTestCase(unittest.TestCase):
 
     def add_culvert(self, layer, wkt="MultiLineString((10 5, 90 20))", **values):
         ft = QgsFeature(layer.fields())
-        defaults = {"NAME": "c1", "CE1": 0.5, "CE2": 0.5, "CS1": 1.0, "CS2": 1.0, "LARG": 1.2, "HAUT": 1.2,
-                    "CLAP": "0", "L12": 1.0, "Z1": 10.0, "Z2": 11.0, "CV": 0.0, "C56": 0.0, "CV5": 0.0,
+        defaults = {"NAME": "c1", "CE1": 0.5, "CE2": 0.5, "CS1": 1.0, "CS2": 1.0, "LRG": 1.2, "HAUT1": 1.2,
+                    "CLP": 0, "LBUS": 1.0, "Z1": 10.0, "Z2": 11.0, "CV": 0.0, "C56": 0.0, "CV5": 0.0,
                     "C5": 0.0, "CT": 0.0, "HAUT2": 0.0, "FRIC": 0.0, "LENGTH": 10.0, "CIRC": 1,
-                    "d1": 90.0, "d2": 90.0, "a1": 0.0, "a2": 0.0, "AA": 1, "NB_in_//": 1, "AL": 1,
-                    "AZ": 0, "N1": 1, "N2": 3}  # fmt: skip
+                    "D1": 90.0, "D2": 90.0, "A1": 0.0, "A2": 0.0, "AA": 1, "NB_in_//": 1, "AL": 1,
+                    "AZ": 0, "I1": 1, "I2": 3}  # fmt: skip
         defaults.update(values)
         for name, value in defaults.items():
             ft[name] = value
@@ -140,10 +140,10 @@ class TestNodes(CulvertManagerTestCase):
     def test_n_without_rendering_the_mesh(self):
         self.add_mesh()
         layer = self.add_culvert_layer()
-        self.add_culvert(layer, N1=None, N2=None)
+        self.add_culvert(layer, I1=None, I2=None)
         self.dock.update_all_auto()
         ft = next(layer.getFeatures())
-        self.assertEqual((ft["N1"], ft["N2"]), (1, 2))
+        self.assertEqual((ft["I1"], ft["I2"]), (1, 2))
 
     def test_point_outside_mesh_gives_null(self):
         self.add_mesh()
@@ -151,25 +151,25 @@ class TestNodes(CulvertManagerTestCase):
         self.add_culvert(layer, "MultiLineString((10 5, 900 500))")
         self.dock.update_all_auto()
         ft = next(layer.getFeatures())
-        self.assertEqual(ft["N1"], 1)
-        self.assertTrue(is_null(ft["N2"]))
+        self.assertEqual(ft["I1"], 1)
+        self.assertTrue(is_null(ft["I2"]))
 
     def test_linestring_layer_is_accepted(self):
         self.add_mesh()
         layer = self.memory_layer("LineString")
-        self.add_culvert(layer, "LineString(10 5, 90 20)", N1=None, N2=None)
+        self.add_culvert(layer, "LineString(10 5, 90 20)", I1=None, I2=None)
         self.dock.update_all_auto()
         ft = next(layer.getFeatures())
-        self.assertEqual((ft["N1"], ft["N2"]), (1, 2))
+        self.assertEqual((ft["I1"], ft["I2"]), (1, 2))
 
     def test_project_crs_change_does_not_change_nodes(self):
         self.add_mesh()
         layer = self.add_culvert_layer()
-        self.add_culvert(layer, N1=None, N2=None)
+        self.add_culvert(layer, I1=None, I2=None)
         self.dock.update_all_auto()
         set_canvas_crs("EPSG:3857")
         self.dock.update_all_auto()
-        self.assertEqual([(ft["N1"], ft["N2"]) for ft in layer.getFeatures()], [(1, 2)])
+        self.assertEqual([(ft["I1"], ft["I2"]) for ft in layer.getFeatures()], [(1, 2)])
 
     def test_culvert_crs_differs_from_mesh_crs(self):
         self.add_mesh()
@@ -178,10 +178,10 @@ class TestNodes(CulvertManagerTestCase):
         )
         points = [to_3942.transform(QgsPointXY(x, y)) for x, y in ((10, 5), (90, 20))]
         layer = self.memory_layer("MultiLineString", "EPSG:3942")
-        self.add_culvert(layer, QgsGeometry.fromMultiPolylineXY([points]).asWkt(), N1=None, N2=None)
+        self.add_culvert(layer, QgsGeometry.fromMultiPolylineXY([points]).asWkt(), I1=None, I2=None)
         self.dock.update_all_auto()
         ft = next(layer.getFeatures())
-        self.assertEqual((ft["N1"], ft["N2"]), (1, 2))
+        self.assertEqual((ft["I1"], ft["I2"]), (1, 2))
 
 
 class TestLocator(unittest.TestCase):
@@ -246,22 +246,22 @@ class TestExport(CulvertManagerTestCase):
         self.assertEqual(float(values[header.index("Y2")]), 20.0)
 
     def test_export_recomputes_automatic_values_without_touching_the_layer(self):
-        layer = self.setup_layers(N1=999, N2=998, Z1=-5.0, Z2=-5.0, LENGTH=1.0, a1=7.0, a2=7.0, AZ=1, AL=1, AA=1)
+        layer = self.setup_layers(I1=999, I2=998, Z1=-5.0, Z2=-5.0, LENGTH=1.0, A1=7.0, A2=7.0, AZ=1, AL=1, AA=1)
         lines = self.export(0)
         header, values = lines[2].split("\t"), lines[3].split("\t")
-        get = {name: values[header.index(name)] for name in ("N1", "N2", "Z1", "Z2", "LENGTH", "a1", "a2")}
-        self.assertEqual((get["N1"], get["N2"]), ("1", "2"))
+        get = {name: values[header.index(name)] for name in ("I1", "I2", "Z1", "Z2", "LENGTH", "A1", "A2")}
+        self.assertEqual((get["I1"], get["I2"]), ("1", "2"))
         self.assertEqual((float(get["Z1"]), float(get["Z2"])), (10.0, 11.0))
-        self.assertAlmostEqual(float(get["a2"]), 10.6, places=1)
-        self.assertAlmostEqual(float(get["a1"]), 190.6, places=1)
+        self.assertAlmostEqual(float(get["A2"]), 10.6, places=1)
+        self.assertAlmostEqual(float(get["A1"]), 190.6, places=1)
         ft = next(layer.getFeatures())
-        self.assertEqual((ft["N1"], ft["N2"], ft["Z1"], ft["LENGTH"]), (999, 998, -5.0, 1.0))
+        self.assertEqual((ft["I1"], ft["I2"], ft["Z1"], ft["LENGTH"]), (999, 998, -5.0, 1.0))
 
     def test_manual_values_are_kept_when_automatic_is_off(self):
-        self.setup_layers(Z1=3.5, Z2=4.5, LENGTH=12.5, a1=1.0, a2=2.0, AZ=0, AL=0, AA=0)
+        self.setup_layers(Z1=3.5, Z2=4.5, LENGTH=12.5, A1=1.0, A2=2.0, AZ=0, AL=0, AA=0)
         lines = self.export(0)
         header, values = lines[2].split("\t"), lines[3].split("\t")
-        for name, expected in (("Z1", 3.5), ("Z2", 4.5), ("LENGTH", 12.5), ("a1", 1.0), ("a2", 2.0)):
+        for name, expected in (("Z1", 3.5), ("Z2", 4.5), ("LENGTH", 12.5), ("A1", 1.0), ("A2", 2.0)):
             self.assertEqual(float(values[header.index(name)]), expected, name)
 
     def test_culvert_outside_the_mesh_blocks_the_export(self):
@@ -270,24 +270,24 @@ class TestExport(CulvertManagerTestCase):
         self.assertFalse(self.dock.lst_problems.isHidden())
 
     def test_verification_does_not_modify_the_layer(self):
-        layer = self.setup_layers(N1=999, N2=998)
+        layer = self.setup_layers(I1=999, I2=998)
         self.dock.verif_culvert()
         ft = next(layer.getFeatures())
-        self.assertEqual((ft["N1"], ft["N2"]), (999, 998))
+        self.assertEqual((ft["I1"], ft["I2"]), (999, 998))
 
     def test_update_button_writes_and_saves_the_automatic_values(self):
-        layer = self.setup_layers(N1=999, N2=998, Z1=-5.0, Z2=-5.0, LENGTH=1.0, AZ=1, AL=1, AA=0, a1=7.0)
+        layer = self.setup_layers(I1=999, I2=998, Z1=-5.0, Z2=-5.0, LENGTH=1.0, AZ=1, AL=1, AA=0, A1=7.0)
         changed = []
         layer.attributeValueChanged.connect(lambda *a: changed.append(a))
         self.dock.btn_update_auto.click()
         ft = next(layer.getFeatures())
-        self.assertEqual((ft["N1"], ft["N2"], ft["Z1"], ft["Z2"]), (1, 2, 10.0, 11.0))
+        self.assertEqual((ft["I1"], ft["I2"], ft["Z1"], ft["Z2"]), (1, 2, 10.0, 11.0))
         self.assertAlmostEqual(ft["LENGTH"], (80**2 + 15**2) ** 0.5)
-        self.assertEqual(ft["a1"], 7.0)
+        self.assertEqual(ft["A1"], 7.0)
         self.assertTrue(changed)
         self.assertFalse(layer.isEditable())
         reopened = QgsVectorLayer(layer.source(), "x", "ogr")
-        self.assertEqual(next(reopened.getFeatures())["N1"], 1)
+        self.assertEqual(next(reopened.getFeatures())["I1"], 1)
 
     def test_update_does_not_commit_user_edits(self):
         layer = self.setup_layers()
@@ -359,8 +359,8 @@ class TestImport(CulvertManagerTestCase):
         self.project.addMapLayer(mesh)
         layer = self.dock.import_culvert_file(SIPHON, items_of(SIPHON), "", QgsCoordinateReferenceSystem(CRS))
         ft = next(layer.getFeatures())
-        self.assertEqual((ft["N1"], ft["N2"]), (198, 661))
-        self.assertAlmostEqual(ft["LARG"], 2.523)
+        self.assertEqual((ft["I1"], ft["I2"]), (198, 661))
+        self.assertAlmostEqual(ft["LRG"], 2.523)
         self.assertEqual(ft["CIRC"], 1)
         self.assertAlmostEqual(self.dock.sb_relax.value(), 0.2)
         self.assertAlmostEqual(culvert_core.culvert_relaxation(layer), 0.2)
@@ -406,7 +406,7 @@ class TestImport(CulvertManagerTestCase):
             expected = to_3942.transform(QgsPointXY(x, y))
             self.assertAlmostEqual(got.x(), expected.x(), places=3)
             self.assertAlmostEqual(got.y(), expected.y(), places=3)
-        self.assertEqual((ft["N1"], ft["N2"], ft["NAME"], ft["CE1"], ft["CIRC"]), (1, 2, "u 1", 0.7, 0))
+        self.assertEqual((ft["I1"], ft["I2"], ft["NAME"], ft["CE1"], ft["CIRC"]), (1, 2, "u 1", 0.7, 0))
 
     def test_import_detects_the_option(self):
         for text, expected in (("c\n0.2 1\nN1\tN2\tFRIC\n1\t3\t0.0\n", 1), ("c\n0.2 1\nN1\tN2\tFRIC\n1\t3\t0.02\n", 2)):
@@ -441,10 +441,10 @@ class TestFormats(CulvertManagerTestCase):
         for extension, folder in self.each_format():
             self.add_mesh()
             layer = self.add_culvert_layer(os.path.join(folder, f"culv.{extension}"))
-            self.add_culvert(layer, N1=999, N2=998)
+            self.add_culvert(layer, I1=999, I2=998)
             self.dock.btn_update_auto.click()
             reopened = QgsVectorLayer(layer.source(), "x", "ogr")
-            self.assertEqual(next(reopened.getFeatures())["N2"], 2)
+            self.assertEqual(next(reopened.getFeatures())["I2"], 2)
             lines = self.export(0)
             self.assertEqual(len(lines[2].split("\t")), len(lines[3].split("\t")))
 
@@ -478,7 +478,7 @@ class TestPanel(CulvertManagerTestCase):
         self.assertIn("culvert layer", self.dock.lbl_status.text())
         layer = self.add_culvert_layer()
         self.add_culvert(layer)
-        self.add_culvert(layer, NAME="c2", HAUT=0.0)
+        self.add_culvert(layer, NAME="c2", HAUT1=0.0)
         self.assertIn("Select a culvert", self.dock.lbl_status.text())
         layer.selectAll()
         self.assertIn("2 culverts", self.dock.lbl_status.text())
@@ -488,7 +488,7 @@ class TestPanel(CulvertManagerTestCase):
         self.assertTrue(self.dock.gb_cur_culv.isEnabled())
         # nodes computed now from the mesh, not the stored ones (1, 3)
         self.assertIn("1 → 2", self.dock.lbl_selected.text())
-        self.assertIn("HAUT", self.dock.lbl_selected.text())
+        self.assertIn("HAUT1", self.dock.lbl_selected.text())
 
     def test_edit_button_opens_the_native_form(self):
         self.add_mesh()
@@ -509,7 +509,7 @@ class TestPanel(CulvertManagerTestCase):
         self.add_mesh()
         layer = self.add_culvert_layer()
         self.add_culvert(layer, NAME="good")
-        self.add_culvert(layer, NAME="bad", HAUT=0.0)
+        self.add_culvert(layer, NAME="bad", HAUT1=0.0)
         self.dock.verif_culvert()
         self.assertEqual(self.dock.lst_problems.count(), 1)
         item = self.dock.lst_problems.item(0)
@@ -575,6 +575,54 @@ class TestMeshDataset(CulvertManagerTestCase):
         self.assertEqual(self.dock.cb_dataset_mesh.currentText(), "Bed Elevation")
 
 
+class TestLegacyLayer(CulvertManagerTestCase):
+    """Layers created before the plugin version 1 (N1, N2, LARG, HAUT, CLAP as text, L12, d1...)."""
+
+    def legacy_layer(self):
+        legacy = {"I1": "N1", "I2": "N2", "LRG": "LARG", "HAUT1": "HAUT", "CLP": "CLAP", "LBUS": "L12",
+                  "D1": "d1", "D2": "d2", "A1": "a1", "A2": "a2"}  # fmt: skip
+        layer = QgsVectorLayer(f"MultiLineString?crs={CRS}", "old culverts", "memory")
+        fields = []
+        for field in culvert_core.culvert_fields():
+            name = legacy.get(field.name(), field.name())
+            fields.append(QgsField(name, QMetaType.Type.QString if name == "CLAP" else field.type()))
+        layer.dataProvider().addAttributes(fields)
+        layer.updateFields()
+        feature = QgsFeature(layer.fields())
+        values = {"NAME": "old", "CE1": 0.5, "CE2": 0.5, "CS1": 1.0, "CS2": 1.0, "LARG": 1.2, "HAUT": 1.2,
+                  "CLAP": "1", "L12": 1.0, "Z1": 10.0, "Z2": 11.0, "CV": 0.0, "C56": 0.0, "CV5": 0.0, "C5": 0.0,
+                  "CT": 0.0, "HAUT2": 0.0, "FRIC": 0.0, "LENGTH": 10.0, "CIRC": 1, "d1": 0.0, "d2": 0.0,
+                  "a1": 0.0, "a2": 0.0, "AA": 0, "NB_in_//": 1, "AL": 0, "AZ": 0, "N1": 7, "N2": 8}  # fmt: skip
+        for name, value in values.items():
+            feature[name] = value
+        feature.setGeometry(QgsGeometry.fromWkt("MultiLineString((10 5, 90 20))"))
+        layer.dataProvider().addFeatures([feature])
+        self.project.addMapLayer(layer)
+        return layer
+
+    def test_listed_updated_and_exported(self):
+        self.add_mesh()
+        layer = self.legacy_layer()
+        self.assertGreaterEqual(self.dock.cb_lay_culv.findData(layer.id(), 256), 0)
+        self.dock.cb_lay_culv.setCurrentIndex(self.dock.cb_lay_culv.findData(layer.id(), 256))
+        self.dock.update_all_auto()
+        feature = next(layer.getFeatures())
+        self.assertEqual((feature["N1"], feature["N2"]), (1, 2))
+        lines = self.export(0)
+        header, values = lines[2].split("\t"), lines[3].split("\t")
+        self.assertEqual(header[:2], ["I1", "I2"])
+        self.assertEqual((values[header.index("I1")], values[header.index("CLP")]), ("1", "1"))
+        self.assertEqual(values[header.index("LRG")], "1.2")
+
+    def test_uhaina_header_keeps_its_names(self):
+        self.add_mesh()
+        layer = self.add_culvert_layer()
+        self.add_culvert(layer)
+        header = self.export(1)[2].split("\t")
+        for name in ("LARG", "HAUT", "CLAP", "L12", "d1", "a1"):
+            self.assertIn(name, header)
+
+
 class TestImportDialog(CulvertManagerTestCase):
     def test_space_separated_official_file_is_mapped(self):
         from mesh_tools.libs.import_culvert_file_dlg import dlg_import_culvert_file
@@ -582,13 +630,13 @@ class TestImportDialog(CulvertManagerTestCase):
         dlg = dlg_import_culvert_file([f.name for f in FIELDS], QgsCoordinateReferenceSystem(CRS), self.dock)
         dlg.text_file.setFilePath(SIPHON)
         dlg.parseTextFile()
-        self.assertEqual(dlg.items["n1"][1], "I1")
-        self.assertEqual(dlg.items["larg"][1], "LRG")
-        self.assertEqual(dlg.items["l12"][1], "LBUS")
+        self.assertEqual(dlg.items["i1"][1], "I1")
+        self.assertEqual(dlg.items["lrg"][1], "LRG")
+        self.assertEqual(dlg.items["lbus"][1], "LBUS")
         self.assertEqual(dlg.items["d1"][1], "D1")
         dlg.text_file.setFilePath("")
         dlg.parseTextFile()
-        self.assertEqual(dlg.items["n1"][1], "")
+        self.assertEqual(dlg.items["i1"][1], "")
 
 
 if __name__ == "__main__":

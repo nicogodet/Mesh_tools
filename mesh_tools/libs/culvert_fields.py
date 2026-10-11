@@ -8,8 +8,6 @@ from typing import Optional
 KIND_STR = "str"
 KIND_FLOAT = "float"
 KIND_INT = "int"
-# Integer flag kept in a text field (CLAP)
-KIND_INT_TEXT = "int_text"
 
 SOFT_TELEMAC = 0
 SOFT_UHAINA = 1
@@ -17,12 +15,15 @@ SOFT_UHAINA = 1
 
 @dataclass(frozen=True)
 class CulvertField:
+    # TELEMAC name (CULVERTS DATA FILE, telemac2d lecbus.f)
     name: str
     kind: str
-    widget: Optional[str]
     # Column index in the exported file, None if the software does not read it
     telemac_col: Optional[int]
     uhaina_col: Optional[int]
+    # Name used by the plugin before its version 1: still read in older layers and files, and written in the
+    # Uhaina file header
+    legacy: Optional[str] = None
 
     def col(self, software: int) -> Optional[int]:
         return self.uhaina_col if software == SOFT_UHAINA else self.telemac_col
@@ -30,56 +31,50 @@ class CulvertField:
 
 # fmt: off
 FIELDS = (
-    CulvertField("NAME",     KIND_STR,      "txt_name",  28, 23),
-    CulvertField("N1",       KIND_INT,      None,        0,  None),
-    CulvertField("N2",       KIND_INT,      None,        1,  None),
-    CulvertField("CE1",      KIND_FLOAT,    "sb_ce1",    2,  6),
-    CulvertField("CE2",      KIND_FLOAT,    "sb_ce2",    3,  7),
-    CulvertField("CS1",      KIND_FLOAT,    "sb_cs1",    4,  8),
-    CulvertField("CS2",      KIND_FLOAT,    "sb_cs2",    5,  9),
-    CulvertField("LARG",     KIND_FLOAT,    "sb_larg",   6,  17),
-    CulvertField("HAUT",     KIND_FLOAT,    "sb_haut1",  7,  18),
-    CulvertField("CLAP",     KIND_INT_TEXT, "cb_clapet", 8,  20),
-    CulvertField("L12",      KIND_FLOAT,    "sb_l12",    9,  10),
-    CulvertField("Z1",       KIND_FLOAT,    "sb_z1",     10, 2),
-    CulvertField("Z2",       KIND_FLOAT,    "sb_z2",     11, 5),
-    CulvertField("CV",       KIND_FLOAT,    "sb_cv",     12, None),
-    CulvertField("C56",      KIND_FLOAT,    "sb_c56",    13, None),
-    CulvertField("CV5",      KIND_FLOAT,    "sb_cv5",    14, None),
-    CulvertField("C5",       KIND_FLOAT,    "sb_c5",     15, None),
-    CulvertField("CT",       KIND_FLOAT,    "sb_ct",     16, None),
-    CulvertField("HAUT2",    KIND_FLOAT,    "sb_haut2",  17, 19),
-    CulvertField("FRIC",     KIND_FLOAT,    "sb_fric",   18, None),
-    CulvertField("LENGTH",   KIND_FLOAT,    "sb_length", 19, None),
-    CulvertField("CIRC",     KIND_INT,      "cb_circ",   20, 16),
-    CulvertField("d1",       KIND_FLOAT,    "sb_d1",     21, 11),
-    CulvertField("d2",       KIND_FLOAT,    "sb_d2",     22, 12),
-    CulvertField("a1",       KIND_FLOAT,    "sb_a1",     23, 14),
-    CulvertField("a2",       KIND_FLOAT,    "sb_a2",     24, 15),
-    CulvertField("AA",       KIND_INT,      "cb_auto_a", 25, 13),
-    CulvertField("NB_in_//", KIND_INT,      "sb_nbre",   None, 21),
-    CulvertField("AL",       KIND_INT,      "cb_auto_l", 26, None),
-    CulvertField("AZ",       KIND_INT,      "cb_auto_z", 27, 22),
+    CulvertField("NAME",     KIND_STR,   28,   23),
+    CulvertField("I1",       KIND_INT,   0,    None, "N1"),
+    CulvertField("I2",       KIND_INT,   1,    None, "N2"),
+    CulvertField("CE1",      KIND_FLOAT, 2,    6),
+    CulvertField("CE2",      KIND_FLOAT, 3,    7),
+    CulvertField("CS1",      KIND_FLOAT, 4,    8),
+    CulvertField("CS2",      KIND_FLOAT, 5,    9),
+    CulvertField("LRG",      KIND_FLOAT, 6,    17,   "LARG"),
+    CulvertField("HAUT1",    KIND_FLOAT, 7,    18,   "HAUT"),
+    CulvertField("CLP",      KIND_INT,   8,    20,   "CLAP"),
+    CulvertField("LBUS",     KIND_FLOAT, 9,    10,   "L12"),
+    CulvertField("Z1",       KIND_FLOAT, 10,   2),
+    CulvertField("Z2",       KIND_FLOAT, 11,   5),
+    CulvertField("CV",       KIND_FLOAT, 12,   None),
+    CulvertField("C56",      KIND_FLOAT, 13,   None),
+    CulvertField("CV5",      KIND_FLOAT, 14,   None),
+    CulvertField("C5",       KIND_FLOAT, 15,   None),
+    CulvertField("CT",       KIND_FLOAT, 16,   None),
+    CulvertField("HAUT2",    KIND_FLOAT, 17,   19),
+    CulvertField("FRIC",     KIND_FLOAT, 18,   None),
+    CulvertField("LENGTH",   KIND_FLOAT, 19,   None),
+    CulvertField("CIRC",     KIND_INT,   20,   16),
+    CulvertField("D1",       KIND_FLOAT, 21,   11,   "d1"),
+    CulvertField("D2",       KIND_FLOAT, 22,   12,   "d2"),
+    CulvertField("A1",       KIND_FLOAT, 23,   14,   "a1"),
+    CulvertField("A2",       KIND_FLOAT, 24,   15,   "a2"),
+    CulvertField("AA",       KIND_INT,   25,   13),
+    CulvertField("NB_in_//", KIND_INT,   None, 21),
+    CulvertField("AL",       KIND_INT,   26,   None),
+    CulvertField("AZ",       KIND_INT,   27,   22),
 )
 # fmt: on
 
 FIELD_NAMES = tuple(f.name for f in FIELDS)
+FIELD_BY_NAME = {f.name: f for f in FIELDS}
 
-# Header names used in TELEMAC documentation/examples, mapped to the plugin field names (lower case)
-HEADER_ALIASES = {
-    "i1": "n1",
-    "i2": "n2",
-    "lrg": "larg",
-    "haut1": "haut",
-    "clp": "clap",
-    "lbus": "l12",
-}
+# Other column names accepted in culvert files and layers (lower case): names of the plugin before its version 1
+HEADER_ALIASES = {f.legacy.lower(): f.name.lower() for f in FIELDS if f.legacy}
 
 
 # TELEMAC keyword OPTION FOR CULVERTS (1 by default): fields read in the file but not used by the computation
 # (telemac2d buse.f). The file format is the same for both options.
 OPTION_1_UNUSED = frozenset({"CV", "C56", "CV5", "C5", "CT", "FRIC", "LENGTH"})
-OPTION_2_UNUSED = frozenset({"L12"})
+OPTION_2_UNUSED = frozenset({"LBUS"})
 DEFAULT_OPTION = 1
 
 
@@ -88,22 +83,22 @@ def used_by_option(name: str, option: int, circular: bool = False) -> bool:
     if option == 2:
         return name not in OPTION_2_UNUSED
     # Option 1 does not use the width of circular culverts
-    return name not in OPTION_1_UNUSED and not (name == "LARG" and circular)
+    return name not in OPTION_1_UNUSED and not (name == "LRG" and circular)
 
 
 # Description and unit of each field, used by the dock and the layer style
 # fmt: off
 FIELD_INFO = {
-    "NAME": ("Name", ""), "N1": ("Node 1", ""), "N2": ("Node 2", ""),
+    "NAME": ("Name", ""), "I1": ("Node 1", ""), "I2": ("Node 2", ""),
     "CE1": ("Head loss coef. inflow 1", ""), "CE2": ("Head loss coef. inflow 2", ""),
     "CS1": ("Head loss coef. outflow 1", ""), "CS2": ("Head loss coef. outflow 2", ""),
-    "LARG": ("Width", "m"), "HAUT": ("Height 1", "m"), "HAUT2": ("Height 2 (0: same as height 1)", "m"),
-    "CLAP": ("Valve", ""), "L12": ("Linear head loss coef.", ""), "Z1": ("Elevation 1", "m"),
+    "LRG": ("Width", "m"), "HAUT1": ("Height 1", "m"), "HAUT2": ("Height 2 (0: same as height 1)", "m"),
+    "CLP": ("Valve", ""), "LBUS": ("Linear head loss coef.", ""), "Z1": ("Elevation 1", "m"),
     "Z2": ("Elevation 2", "m"), "CV": ("Valve head loss coef.", ""), "C56": ("Flow type 5/6 coef.", ""),
     "CV5": ("Flow type 5 correction coef.", ""), "C5": ("Flow type 5 coef.", ""),
     "CT": ("Trash screen head loss coef.", ""), "FRIC": ("Manning coef.", ""), "LENGTH": ("Length", "m"),
-    "CIRC": ("Circular", ""), "d1": ("Angle with the vertical 1", "°"), "d2": ("Angle with the vertical 2", "°"),
-    "a1": ("Angle with the x axis 1", "°"), "a2": ("Angle with the x axis 2", "°"),
+    "CIRC": ("Circular", ""), "D1": ("Angle with the vertical 1", "°"), "D2": ("Angle with the vertical 2", "°"),
+    "A1": ("Angle with the x axis 1", "°"), "A2": ("Angle with the x axis 2", "°"),
     "AA": ("Automatic angles", ""), "NB_in_//": ("Number in parallel", ""), "AL": ("Automatic length", ""),
     "AZ": ("Automatic elevations", ""),
 }

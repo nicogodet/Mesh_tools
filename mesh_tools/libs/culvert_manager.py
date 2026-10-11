@@ -307,7 +307,7 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
             return f"{value:.2f}" if isinstance(value, float) else str(value)
 
         lines = [
-            escape(self.tr("Nodes {} → {}").format(show("N1"), show("N2"))),
+            escape(self.tr("Nodes {} → {}").format(show("I1"), show("I2"))),
             escape(self.tr("Elevations {} → {} m").format(show("Z1"), show("Z2"))),
         ]
         _, problems = culvert_core.export_records(

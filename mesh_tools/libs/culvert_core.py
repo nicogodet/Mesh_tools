@@ -35,11 +35,11 @@ from qgis.PyQt.QtCore import QCoreApplication, QMetaType
 
 from .culvert_fields import (
     DEFAULT_OPTION,
+    FIELD_BY_NAME,
     FIELD_NAMES,
     FIELDS,
     KIND_FLOAT,
     KIND_INT,
-    KIND_INT_TEXT,
     KIND_STR,
     SOFT_TELEMAC,
 )
@@ -59,7 +59,6 @@ STYLE_FILE = os.path.join(os.path.dirname(__file__), "..", "styles", "culvert.qm
 
 QT_TYPES = {
     KIND_STR: QMetaType.Type.QString,
-    KIND_INT_TEXT: QMetaType.Type.QString,
     KIND_FLOAT: QMetaType.Type.Double,
     KIND_INT: QMetaType.Type.Int,
 }
@@ -176,12 +175,28 @@ def culvert_fields() -> QgsFields:
     return fields
 
 
+def field_index(fields, name) -> int:
+    """Index of a culvert field, also found under its name before the plugin version 1 (N1, LARG...), -1 if none."""
+    index = fields.lookupField(name)
+    legacy = FIELD_BY_NAME[name].legacy if name in FIELD_BY_NAME else None
+    if index < 0 and legacy:
+        index = fields.lookupField(legacy)
+    return index
+
+
+def feature_value(feature, name):
+    """Value of a culvert field of a feature (current or legacy name), None if NULL or missing."""
+    index = field_index(feature.fields(), name)
+    value = feature.attribute(index) if index >= 0 else None
+    return None if is_null(value) or value == NULL else value
+
+
 def is_culvert_layer(layer) -> bool:
-    """Line layer having all the culvert fields (whatever their case)."""
+    """Line layer having all the culvert fields (whatever their case, current or legacy names)."""
     if layer is None or layer.type() != Qgis.LayerType.Vector or layer.geometryType() != Qgis.GeometryType.Line:
         return False
-    names = {f.name().lower() for f in layer.fields()}
-    return all(name.lower() in names for name in FIELD_NAMES)
+    fields = layer.fields()
+    return all(field_index(fields, name) >= 0 for name in FIELD_NAMES)
 
 
 def layer_setting(layer, name, default=None):
@@ -224,19 +239,15 @@ def set_layer_settings(layer, persist=True, **settings):
 
 
 def culvert_name(feature) -> str:
-    name = feature["NAME"]
-    if is_null(name) or name in [NULL, ""]:
+    name = feature_value(feature, "NAME")
+    if name in (None, ""):
         return tr("Nameless culvert (feature id {})").format(feature.id())
     return name
 
 
 def record_from_feature(feature) -> dict:
     """Feature attributes as a dict for culvert_io, NULL being None."""
-    record = {}
-    for name in FIELD_NAMES:
-        value = feature[name]
-        record[name] = None if is_null(value) or value == NULL else value
-    return record
+    return {name: feature_value(feature, name) for name in FIELD_NAMES}
 
 
 def write_vector_file(layer, path, name=None) -> Tuple[Optional[str], Optional[str]]:
@@ -359,12 +370,12 @@ def auto_values(context: MeshContext, culv_to_mesh, feature, dataset_group) -> T
     """
     vertices = mesh_vertices(feature.geometry(), culv_to_mesh)
     (n1, n2), err = nodes(context, vertices)
-    values = {"N1": n1, "N2": n2}
+    values = {"I1": n1, "I2": n2}
     errors = [] if err is None else [err]
     if vertices is None:
         return values, errors
 
-    if feature["AZ"] == 1 and err is None:
+    if feature_value(feature, "AZ") == 1 and err is None:
         if dataset_group is None:
             errors.append(tr("No valid mesh dataset for the elevations."))
         else:
@@ -375,11 +386,11 @@ def auto_values(context: MeshContext, culv_to_mesh, feature, dataset_group) -> T
                 else:
                     values[name] = z
 
-    if feature["AL"] == 1:
+    if feature_value(feature, "AL") == 1:
         values["LENGTH"] = sum(p1.distance(p2) for p1, p2 in zip(vertices[:-1], vertices[1:]))
 
-    if feature["AA"] == 1:
-        values["a1"], values["a2"] = angles(vertices)
+    if feature_value(feature, "AA") == 1:
+        values["A1"], values["A2"] = angles(vertices)
 
     return values, errors
 
@@ -417,7 +428,7 @@ def update_auto_values(layer, context: MeshContext, dataset_group, project=None)
         values, errors = auto_values(context, culv_to_mesh, feature, dataset_group)
         problems += [[culvert_name(feature), error, feature.id()] for error in errors]
         attrs[feature.id()] = {
-            fields.lookupField(name): (NULL if value is None else value) for name, value in values.items()
+            field_index(fields, name): (NULL if value is None else value) for name, value in values.items()
         }
     error = write_attributes(layer, attrs)
     if error:
@@ -517,7 +528,7 @@ def import_culvert_file(txt_path, columns: Optional[Dict[str, str]], context: Me
     lower = {header.lower(): header for header in culv_file.headers}
     xy_columns = [lower.get(name) for name in ("x1", "y1", "x2", "y2")]
     result.uhaina = all(xy_columns)
-    if not result.uhaina and not all(columns.get(name) in culv_file.headers for name in ("N1", "N2")):
+    if not result.uhaina and not all(columns.get(name) in culv_file.headers for name in ("I1", "I2")):
         result.error = tr("Columns of the nodes N1 and N2 are not defined.")
         return result
 
@@ -534,15 +545,15 @@ def import_culvert_file(txt_path, columns: Optional[Dict[str, str]], context: Me
                 points = [QgsPointXY(x1, y1), QgsPointXY(x2, y2)]
                 n1, n2 = (context.locator.nearest_node(point)[0] for point in points)
             else:
-                n1 = parse_value(row[columns["N1"]], KIND_INT, "N1")
-                n2 = parse_value(row[columns["N2"]], KIND_INT, "N2")
+                n1 = parse_value(row[columns["I1"]], KIND_INT, "I1")
+                n2 = parse_value(row[columns["I2"]], KIND_INT, "I2")
 
             attrs = []
             for fld in FIELDS:
                 column = columns.get(fld.name)
-                if fld.name == "N1":
+                if fld.name == "I1":
                     attrs.append(n1)
-                elif fld.name == "N2":
+                elif fld.name == "I2":
                     attrs.append(n2)
                 elif column:
                     attrs.append(parse_value(row[column], kinds[fld.name], fld.name))

@@ -13,7 +13,6 @@ from .culvert_fields import (
     HEADER_ALIASES,
     KIND_FLOAT,
     KIND_INT,
-    KIND_INT_TEXT,
     KIND_STR,
     OPTION_1_UNUSED,
     SOFT_TELEMAC,
@@ -33,8 +32,6 @@ def is_null(value) -> bool:
 
 
 def _to_number(value, kind):
-    if kind == KIND_INT_TEXT:
-        return int(value)
     if kind == KIND_INT:
         if isinstance(value, float) and not value.is_integer():
             raise ValueError(value)
@@ -77,16 +74,16 @@ def validate_record(record: dict, software: int = SOFT_TELEMAC, option: int = DE
     """
     problems = []
     for fld in exported_fields(software):
-        if fld.name == "NAME" or fld.name in ("N1", "N2"):
+        if fld.name == "NAME" or fld.name in ("I1", "I2"):
             continue
         if is_used(fld.name, record, software, option) and not is_valid_value(record.get(fld.name), fld.kind):
             problems.append(("invalid", fld.name))
 
     # TELEMAC sets the flow to zero when a height is null, and option 2 divides by the hydraulic radius,
     # which needs a width even for circular culverts
-    positive = ["HAUT"]
-    if software == SOFT_TELEMAC and is_used("LARG", record, software, option):
-        positive.append("LARG")
+    positive = ["HAUT1"]
+    if software == SOFT_TELEMAC and is_used("LRG", record, software, option):
+        positive.append("LRG")
     for name in positive:
         if ("invalid", name) not in problems and float(record[name]) <= 0:
             problems.append(("not_positive", name))
@@ -99,11 +96,12 @@ def validate_record(record: dict, software: int = SOFT_TELEMAC, option: int = DE
 
 
 def _header_names(software: int) -> List[str]:
+    """TELEMAC names for TELEMAC (the header is not read); the names Uhaina files always had for Uhaina."""
     names = []
     for fld in exported_fields(software):
         if software == SOFT_UHAINA and fld.name in ("Z1", "Z2"):
             names += [f"X{fld.name[1]}", f"Y{fld.name[1]}"]
-        names.append(fld.name)
+        names.append(fld.legacy if software == SOFT_UHAINA and fld.legacy else fld.name)
     return names
 
 
@@ -129,7 +127,7 @@ def format_culvert_file(
             value = rec.get(fld.name)
             if fld.name == "HAUT2" and (is_null(value) or value == 0):
                 # In case HAUT2 is empty, suppose it is equal to HAUT
-                value = rec.get("HAUT")
+                value = rec.get("HAUT1")
             elif is_null(value) and fld.kind != KIND_STR and not is_used(fld.name, rec, software, option):
                 value = 0
             if fld.kind != KIND_STR and is_null(value):
@@ -264,4 +262,4 @@ def parse_value(text: str, kind: str, name: str = ""):
         return number
     if not number.is_integer():
         raise CulvertFileError(f"{name}: {text!r} is not an integer.")
-    return str(int(number)) if kind == KIND_INT_TEXT else int(number)
+    return int(number)

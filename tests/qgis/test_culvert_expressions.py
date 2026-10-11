@@ -72,8 +72,8 @@ class TestMeshExpressions(unittest.TestCase):
 
     def add_culvert(self, **values):
         feature = QgsFeature(self.layer.fields())
-        for name, value in {"NAME": "c", "HAUT": 1.0, "LARG": 2.0, "CIRC": 0, "AZ": 1, "AL": 1, "AA": 1,
-                            "Z1": -1.0, "Z2": -1.0, "LENGTH": 0.0, "a1": 0.0, "a2": 0.0}.items():  # fmt: skip
+        for name, value in {"NAME": "c", "HAUT1": 1.0, "LRG": 2.0, "CIRC": 0, "AZ": 1, "AL": 1, "AA": 1,
+                            "Z1": -1.0, "Z2": -1.0, "LENGTH": 0.0, "A1": 0.0, "A2": 0.0}.items():  # fmt: skip
             feature[name] = values.get(name, value)
         feature.setGeometry(QgsGeometry.fromWkt("MultiLineString((10 5, 50 5))"))
         self.layer.dataProvider().addFeatures([feature])
@@ -89,26 +89,26 @@ class TestMeshExpressions(unittest.TestCase):
             context, context.transform_from(self.layer.crs()), feature, context.dataset_group("Bed Elevation")
         )
         self.assertEqual(errors, [])
-        for name in ("N1", "N2", "Z1", "Z2"):
+        for name in ("I1", "I2", "Z1", "Z2"):
             self.assertEqual(feature[name], expected[name], name)
-        for name in ("LENGTH", "a1", "a2"):
+        for name in ("LENGTH", "A1", "A2"):
             self.assertAlmostEqual(feature[name], expected[name], places=6, msg=name)
         self.layer.rollBack()
 
     def test_manual_values_are_kept(self):
-        fid = self.add_culvert(AZ=0, AL=0, AA=0, Z1=3.5, LENGTH=12.0, a1=45.0)
+        fid = self.add_culvert(AZ=0, AL=0, AA=0, Z1=3.5, LENGTH=12.0, A1=45.0)
         self.layer.startEditing()
         self.layer.changeGeometry(fid, QgsGeometry.fromWkt("MultiLineString((10 5, 90 20))"))
         feature = self.layer.getFeature(fid)
-        self.assertEqual((feature["Z1"], feature["LENGTH"], feature["a1"]), (3.5, 12.0, 45.0))
-        self.assertEqual((feature["N1"], feature["N2"]), (1, 2))
+        self.assertEqual((feature["Z1"], feature["LENGTH"], feature["A1"]), (3.5, 12.0, 45.0))
+        self.assertEqual((feature["I1"], feature["I2"]), (1, 2))
         self.layer.rollBack()
 
     def test_circular_width_follows_the_height(self):
-        fid = self.add_culvert(CIRC=1, HAUT=1.5, LARG=9.0)
+        fid = self.add_culvert(CIRC=1, HAUT1=1.5, LRG=9.0)
         self.layer.startEditing()
-        self.layer.changeAttributeValue(fid, self.layer.fields().lookupField("HAUT"), 1.8)
-        self.assertEqual(self.layer.getFeature(fid)["LARG"], 1.8)
+        self.layer.changeAttributeValue(fid, self.layer.fields().lookupField("HAUT1"), 1.8)
+        self.assertEqual(self.layer.getFeature(fid)["LRG"], 1.8)
         self.layer.rollBack()
 
     def test_without_the_plugin_functions_the_values_are_kept(self):
@@ -120,7 +120,7 @@ class TestMeshExpressions(unittest.TestCase):
         self.addCleanup(culvert_expressions.register)
         self.layer.changeGeometry(fid, QgsGeometry.fromWkt("MultiLineString((10 5, 60 50))"))
         after = self.layer.getFeature(fid)
-        for name in ("N1", "N2", "Z1", "Z2"):
+        for name in ("I1", "I2", "Z1", "Z2"):
             self.assertEqual(after[name], before[name], name)
         self.layer.rollBack()
 
@@ -129,8 +129,8 @@ class TestMeshExpressions(unittest.TestCase):
         self.layer.startEditing()
         self.layer.changeGeometry(fid, QgsGeometry.fromWkt("MultiLineString((10 5, 900 500))"))
         feature = self.layer.getFeature(fid)
-        self.assertEqual(feature["N1"], 1)
-        self.assertTrue(feature["N2"] is None or str(feature["N2"]) in ("NULL", "None"))
+        self.assertEqual(feature["I1"], 1)
+        self.assertTrue(feature["I2"] is None or str(feature["I2"]) in ("NULL", "None"))
         self.layer.rollBack()
 
     def test_automatic_fields_are_not_editable(self):
