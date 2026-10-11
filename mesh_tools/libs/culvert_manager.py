@@ -42,6 +42,7 @@ from qgis.core import (
     QgsGeometry,
     QgsMesh,
     QgsMeshDatasetIndex,
+    QgsPointXY,
     QgsVectorFileWriter,
     QgsVectorLayer,
 )
@@ -68,6 +69,7 @@ from .culvert_fields import (
     KIND_INT_TEXT,
     KIND_STR,
     SOFT_TELEMAC,
+    SOFT_UHAINA,
     used_by_option,
 )
 from .culvert_io import (
@@ -935,6 +937,15 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
 
         self.import_culvert_file(txt_path, dlg.items, dlg.layer_file.filePath(), dlg.layer_crs.crs())
 
+    def to_layer(self, point, mesh_to_layer):
+        """(point in the layer CRS, error) from a point in the mesh CRS."""
+        if mesh_to_layer is None:
+            return point, None
+        try:
+            return mesh_to_layer.transform(point), None
+        except QgsCsException:
+            return None, self.tr("The coordinates cannot be converted to the CRS of the layer.")
+
     def import_culvert_file(self, txt_path, items, layer_path, layer_crs):
         """Create a culvert layer from a culvert text file. items maps field.lower() to [field, file column]."""
         try:
@@ -943,10 +954,15 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
             self.writeError(self.tr("Error when reading culvert file : {}").format(err))
             return None
 
-        for key in ("n1", "n2"):
-            if items[key][1] not in culv_file.headers:
-                self.writeError(self.tr("Columns of the nodes N1 and N2 are not defined."))
-                return None
+        # Uhaina files give the coordinates of the extremities (in the mesh CRS) instead of the nodes
+        columns = {header.lower(): header for header in culv_file.headers}
+        xy_columns = [columns.get(name) for name in ("x1", "y1", "x2", "y2")]
+        by_xy = all(xy_columns)
+        if not by_xy:
+            for key in ("n1", "n2"):
+                if items[key][1] not in culv_file.headers:
+                    self.writeError(self.tr("Columns of the nodes N1 and N2 are not defined."))
+                    return None
 
         mesh_to_layer = None
         if self.lay_mesh.crs().isValid():
@@ -970,8 +986,13 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
         rejected = 0
         for i, row in enumerate(culv_file.rows, 1):
             try:
-                n1 = parse_value(row[items["n1"][1]], KIND_INT, "N1")
-                n2 = parse_value(row[items["n2"][1]], KIND_INT, "N2")
+                if by_xy:
+                    x1, y1, x2, y2 = (parse_value(row[col], KIND_FLOAT, col) for col in xy_columns)
+                    mesh_points = [QgsPointXY(x1, y1), QgsPointXY(x2, y2)]
+                    n1, n2 = (self.locator.nearest_node(point)[0] for point in mesh_points)
+                else:
+                    n1 = parse_value(row[items["n1"][1]], KIND_INT, "N1")
+                    n2 = parse_value(row[items["n2"][1]], KIND_INT, "N2")
 
                 attrs = []
                 for fld in self.culv_flds:
@@ -989,8 +1010,15 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
             except CulvertFileError as error:
                 err = str(error)
             else:
-                point_n1, err1 = MeshUtils.xyFromN(self.native_mesh, n1, mesh_to_layer)
-                point_n2, err2 = MeshUtils.xyFromN(self.native_mesh, n2, mesh_to_layer)
+                if by_xy:
+                    (point_n1, err1), (point_n2, err2) = (self.to_layer(point, mesh_to_layer) for point in mesh_points)
+                    if n1 is None or n2 is None:
+                        self.writeWarning(
+                            self.tr("Culvert {}: extremity not within the mesh, N1/N2 left empty.").format(i)
+                        )
+                else:
+                    point_n1, err1 = MeshUtils.xyFromN(self.native_mesh, n1, mesh_to_layer)
+                    point_n2, err2 = MeshUtils.xyFromN(self.native_mesh, n2, mesh_to_layer)
                 err = " ".join(filter(None, (err1, err2)))
                 if not err:
                     fet = QgsFeature(layer.fields())
@@ -1027,6 +1055,8 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
 
         if culv_file.relax is not None:
             self.sb_relax.setValue(culv_file.relax)
+        if by_xy:
+            self.cb_software_select.setCurrentIndex(SOFT_UHAINA)
 
         columns = {fld[0]: items[fld[0].lower()][1] for fld in self.culv_flds}
         option = detect_option(culv_file.rows, columns)

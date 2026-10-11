@@ -450,6 +450,30 @@ class TestImport(CulvertManagerTestCase):
         self.assertAlmostEqual(ft["CE1"], -0.5)
         self.assertAlmostEqual(ft["Z1"], 0.1)
 
+    def test_uhaina_roundtrip(self):
+        self.add_mesh()
+        layer = self.add_culvert_layer()
+        self.add_culvert(layer, "MultiLineString((12 3, 88 21))", NAME="u 1", CE1=0.7, CIRC=0)
+        lines = self.export(1)
+        txt = os.path.join(self.folder, "uhaina.txt")
+        with open(txt, "w") as f:
+            f.write("\n".join(lines) + "\n")
+        to_3942 = QgsCoordinateTransform(
+            QgsCoordinateReferenceSystem(CRS), QgsCoordinateReferenceSystem("EPSG:3942"), self.project
+        )
+        imported = self.dock.import_culvert_file(
+            txt, TestImport.items_of(txt), "", QgsCoordinateReferenceSystem("EPSG:3942")
+        )
+        self.assertIsNotNone(imported)
+        self.assertEqual(self.dock.cb_software_select.currentIndex(), 1)
+        ft = next(imported.getFeatures())
+        vertices = [QgsPointXY(v) for v in ft.geometry().vertices()]
+        for got, (x, y) in zip((vertices[0], vertices[-1]), ((12, 3), (88, 21))):
+            expected = to_3942.transform(QgsPointXY(x, y))
+            self.assertAlmostEqual(got.x(), expected.x(), places=3)
+            self.assertAlmostEqual(got.y(), expected.y(), places=3)
+        self.assertEqual((ft["N1"], ft["N2"], ft["NAME"], ft["CE1"], ft["CIRC"]), (1, 2, "u 1", 0.7, 0))
+
     def test_written_layer_has_the_chosen_crs(self):
         path = os.path.join(self.folder, "imported.shp")
         layer = self.import_text("c\n0.2 1\nN1\tN2\n1\t3\n", layer_path=path, layer_crs="EPSG:3857")
