@@ -45,3 +45,24 @@ def set_canvas_crs(authid):
     crs = QgsCoordinateReferenceSystem(authid)
     qgis.utils.iface.mapCanvas().setDestinationCrs(crs)
     QgsProject.instance().setCrs(crs)
+
+
+def load_plugin():
+    """Load the whole plugin as QGIS does (classFactory + initGui), with the menus and settings it expects.
+
+    The mocked iface of qgis.testing has neither menus nor a user locale.
+    """
+    from qgis.PyQt.QtCore import QSettings
+    from qgis.PyQt.QtWidgets import QMainWindow
+
+    import mesh_tools
+
+    if not QSettings().value("locale/userLocale"):
+        QSettings().setValue("locale/userLocale", "en_US")
+    window = QMainWindow()
+    window.menuBar().addMenu("Mesh").setObjectName("mMeshMenu")
+    qgis.utils.iface.mainWindow = lambda: window
+    plugin = mesh_tools.classFactory(qgis.utils.iface)
+    plugin.initGui()
+    plugin._test_window = window
+    return plugin

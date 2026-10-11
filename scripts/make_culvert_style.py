@@ -35,7 +35,7 @@ from qgis.PyQt.QtGui import QColor
 from qgis.testing import start_app
 
 sys.path.insert(0, os.getcwd())
-from mesh_tools.libs.culvert_fields import FIELDS, OPTION_1_UNUSED  # noqa: E402
+from mesh_tools.libs.culvert_fields import FIELD_INFO, FIELDS, OPTION_1_UNUSED, VALVES  # noqa: E402
 
 QT_TYPES = {
     "str": QMetaType.Type.QString,
@@ -51,32 +51,12 @@ OPTION_2 = "to_int(coalesce(@culvert_option, 1)) = 2"
 LARG_USED = f'({OPTION_2} OR coalesce("CIRC", 0) = 0)'
 
 # fmt: off
-ALIASES = {
-    "NAME": "Name", "N1": "Node 1", "N2": "Node 2",
-    "CE1": "Head loss coef. inflow 1", "CE2": "Head loss coef. inflow 2",
-    "CS1": "Head loss coef. outflow 1", "CS2": "Head loss coef. outflow 2",
-    "LARG": "Width", "HAUT": "Height 1", "HAUT2": "Height 2 (0: = height 1)",
-    "CLAP": "Valve", "L12": "Linear head loss", "Z1": "Elevation 1", "Z2": "Elevation 2",
-    "CV": "Valve head loss coef.", "C56": "Flow type 5/6 coef.", "CV5": "Flow type 5 correction",
-    "C5": "Flow type 5 coef.", "CT": "Trash screen head loss coef.", "FRIC": "Manning coef.",
-    "LENGTH": "Length", "CIRC": "Circular", "d1": "Angle with vertical 1", "d2": "Angle with vertical 2",
-    "a1": "Angle with x axis 1", "a2": "Angle with x axis 2", "AA": "Automatic angles",
-    "NB_in_//": "Number in parallel (Uhaina)", "AL": "Automatic length", "AZ": "Automatic elevations",
-}
-
 DEFAULTS = {
     "d1": "0", "d2": "0", "CE1": "0.5", "CE2": "0.5", "CS1": "1.0", "CS2": "1.0", "LARG": "0", "HAUT": "0",
     "CLAP": "'0'", "L12": "1.0", "Z1": "0", "Z2": "0", "a1": "0", "a2": "0", "CV": "0", "C56": "0",
     "CV5": "0", "C5": "0", "CT": "0", "HAUT2": "0", "FRIC": "0", "LENGTH": "0", "CIRC": "0", "AL": "0",
     "AZ": "0", "AA": "0", "NB_in_//": "1",
 }
-
-VALVES = [
-    ("0", "No valve (1 <-> 2)"),
-    ("1", "Valve, flow 1 -> 2"),
-    ("2", "Valve, flow 2 -> 1"),
-    ("3", "Closed (no flow)"),
-]
 
 FORM = [
     ("Culvert", None, ["NAME", "N1", "N2", "CLAP", "CIRC", "NB_in_//"]),
@@ -214,7 +194,8 @@ def main(path):
 
     for fld in FIELDS:
         idx = fields.lookupField(fld.name)
-        layer.setFieldAlias(idx, ALIASES[fld.name])
+        alias, unit = FIELD_INFO[fld.name]
+        layer.setFieldAlias(idx, f"{alias} ({unit})" if unit else alias)
         if fld.name in AUTOMATIC_DEFAULTS:
             layer.setDefaultValueDefinition(idx, QgsDefaultValue(AUTOMATIC_DEFAULTS[fld.name], True))
         elif fld.name in DEFAULTS:
