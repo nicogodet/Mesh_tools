@@ -386,11 +386,12 @@ def auto_values(context: MeshContext, culv_to_mesh, feature, dataset_group) -> T
                 else:
                     values[name] = z
 
+    # Rounded as the elevations, and as the default value expressions of the style
     if feature_value(feature, "AL") == 1:
-        values["LENGTH"] = sum(p1.distance(p2) for p1, p2 in zip(vertices[:-1], vertices[1:]))
+        values["LENGTH"] = round(sum(p1.distance(p2) for p1, p2 in zip(vertices[:-1], vertices[1:])), 2)
 
     if feature_value(feature, "AA") == 1:
-        values["A1"], values["A2"] = angles(vertices)
+        values["A1"], values["A2"] = (round(angle, 2) for angle in angles(vertices))
 
     return values, errors
 

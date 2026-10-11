@@ -96,14 +96,14 @@ AUTOMATIC_DEFAULTS = {
     "I2": node_expression("I2", "end_point"),
     "Z1": elevation_expression("Z1", "start_point"),
     "Z2": elevation_expression("Z2", "end_point"),
-    "LENGTH": f'if("AL" = 1, coalesce(length({IN_MESH_CRS}), "LENGTH"), "LENGTH")',
+    "LENGTH": f'if("AL" = 1, coalesce(round(length({IN_MESH_CRS}), 2), "LENGTH"), "LENGTH")',
     "A1": (
         f"if(\"AA\" = 1, coalesce(with_variable('g', {IN_MESH_CRS}, "
-        f"({angle('point_n(@g, 1)', 'point_n(@g, 2)')} + 180) % 360), \"A1\"), \"A1\")"
+        f"round(({angle('point_n(@g, 1)', 'point_n(@g, 2)')} + 180) % 360, 2)), \"A1\"), \"A1\")"
     ),
     "A2": (
         f"if(\"AA\" = 1, coalesce(with_variable('g', {IN_MESH_CRS}, "
-        f"{angle('point_n(@g, num_points(@g) - 1)', 'point_n(@g, num_points(@g))')}), \"A2\"), \"A2\")"
+        f"round({angle('point_n(@g, num_points(@g) - 1)', 'point_n(@g, num_points(@g))')}, 2)), \"A2\"), \"A2\")"
     ),
     # A circular culvert is as wide as high
     "LRG": 'if("CIRC" = 1, "HAUT1", "LRG")',
@@ -195,7 +195,8 @@ def main(path):
     for fld in FIELDS:
         idx = fields.lookupField(fld.name)
         alias, unit = FIELD_INFO[fld.name]
-        layer.setFieldAlias(idx, f"{alias} ({unit})" if unit else alias)
+        # TELEMAC code first: it is the column name in the file and in the documentation
+        layer.setFieldAlias(idx, f"{fld.name} : {alias}" + (f" ({unit})" if unit else ""))
         if fld.name in AUTOMATIC_DEFAULTS:
             layer.setDefaultValueDefinition(idx, QgsDefaultValue(AUTOMATIC_DEFAULTS[fld.name], True))
         elif fld.name in DEFAULTS:

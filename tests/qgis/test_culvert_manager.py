@@ -235,7 +235,7 @@ class TestExport(CulvertManagerTestCase):
         header, values = lines[2].split("\t"), lines[3].split("\t")
         self.assertEqual(len(header), len(values))
         self.assertEqual(values[header.index("HAUT2")], "1.2")
-        self.assertAlmostEqual(float(values[header.index("LENGTH")]), (80**2 + 15**2) ** 0.5)
+        self.assertEqual(float(values[header.index("LENGTH")]), round((80**2 + 15**2) ** 0.5, 2))
 
     def test_uhaina(self):
         self.setup_layers()
@@ -282,7 +282,7 @@ class TestExport(CulvertManagerTestCase):
         self.dock.btn_update_auto.click()
         ft = next(layer.getFeatures())
         self.assertEqual((ft["I1"], ft["I2"], ft["Z1"], ft["Z2"]), (1, 2, 10.0, 11.0))
-        self.assertAlmostEqual(ft["LENGTH"], (80**2 + 15**2) ** 0.5)
+        self.assertEqual(ft["LENGTH"], round((80**2 + 15**2) ** 0.5, 2))
         self.assertEqual(ft["A1"], 7.0)
         self.assertTrue(changed)
         self.assertFalse(layer.isEditable())
