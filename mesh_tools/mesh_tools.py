@@ -25,13 +25,15 @@
 
 import os.path
 
-from qgis.core import Qgis
+from qgis.core import Qgis, QgsApplication
 from qgis.PyQt.QtCore import QCoreApplication, QSettings, Qt, QTranslator
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction, QMenu, QToolBar
 from qgis.utils import iface
 
+from .libs import culvert_expressions
 from .libs.culvert_manager import CulvertManager
+from .libs.culvert_processing import MeshToolsProvider
 from .libs.mesh_quality import MeshQuality
 from .libs.source_manager import SourceManager
 from .libs.mesh_translation_dlg import MeshTranslation
@@ -73,6 +75,7 @@ class MeshTools:
 
         self.pluginIsActive = False
         self.dockwidget = None
+        self.provider = None
 
     # noinspection PyMethodMayBeStatic
     def tr(self, message):
@@ -161,8 +164,17 @@ class MeshTools:
 
         return action
 
+    def initProcessing(self):
+        # Called by QGIS for qgis_process, and by initGui
+        if self.provider is not None:
+            return
+        self.provider = MeshToolsProvider()
+        QgsApplication.processingRegistry().addProvider(self.provider)
+
     def initGui(self):
         """Create the menu entries and toolbar icons inside the QGIS GUI."""
+        self.initProcessing()
+        culvert_expressions.register()
         icon_path = os.path.join(self.plugin_dir, "icon.png")
         self.mesh_menu = self.iface.mainWindow().findChild(QMenu, "mMeshMenu")
         self.pluginMenu = self.mesh_menu.addMenu(QIcon(icon_path), self.menu)
@@ -213,6 +225,11 @@ class MeshTools:
         """Removes the plugin menu item and icon from QGIS GUI."""
         if self.dockwidget:
             self.dockwidget.close()
+
+        if self.provider is not None:
+            QgsApplication.processingRegistry().removeProvider(self.provider)
+            self.provider = None
+        culvert_expressions.unregister()
 
         self.pluginMenu.parentWidget().removeAction(self.pluginMenu.menuAction())
         for action in self.actions:

@@ -14,6 +14,7 @@ from qgis.core import (
     QgsAttributeEditorContainer,
     QgsAttributeEditorField,
     QgsDefaultValue,
+    QgsEditFormConfig,
     QgsEditorWidgetSetup,
     QgsField,
     QgsFieldConstraints,
@@ -23,6 +24,8 @@ from qgis.core import (
     QgsMarkerSymbol,
     QgsOptionalExpression,
     QgsExpression,
+    QgsProperty,
+    QgsPropertyCollection,
     QgsRuleBasedRenderer,
     QgsSimpleLineSymbolLayer,
     QgsVectorLayer,
@@ -86,6 +89,55 @@ FORM = [
 # fmt: on
 
 INVALID = '"N1" IS NULL OR "N2" IS NULL OR coalesce("HAUT", 0) <= 0'
+
+# Automatic values, updated whenever a culvert is modified. The mesh functions come from the Mesh Tools plugin:
+# they are called through eval() so that without the plugin the stored value is kept (eval gives NULL).
+# @culvert_mesh and @culvert_bottom are layer variables set by the plugin.
+IN_MESH_CRS = "transform($geometry, @layer_crs, layer_property(@culvert_mesh, 'crs'))"
+
+
+def node_expression(field, point):
+    index = f"eval('mesh_vertex_index(@culvert_mesh, {point}($geometry))')"
+    return f'with_variable(\'i\', {index}, if(@i IS NULL, "{field}", if(@i < 0, NULL, @i + 1)))'
+
+
+def elevation_expression(field, point):
+    value = f"eval('mesh_vertex_value(@culvert_mesh, @culvert_bottom, {point}($geometry))')"
+    return f'if("AZ" = 1, coalesce({value}, "{field}"), "{field}")'
+
+
+def angle(first, second):
+    """TELEMAC angle with the x axis (counterclockwise, degrees) from the azimuth (clockwise from north)."""
+    return f"(450 - degrees(azimuth({first}, {second}))) % 360"
+
+
+AUTOMATIC_DEFAULTS = {
+    "N1": node_expression("N1", "start_point"),
+    "N2": node_expression("N2", "end_point"),
+    "Z1": elevation_expression("Z1", "start_point"),
+    "Z2": elevation_expression("Z2", "end_point"),
+    "LENGTH": f'if("AL" = 1, coalesce(length({IN_MESH_CRS}), "LENGTH"), "LENGTH")',
+    "a1": (
+        f"if(\"AA\" = 1, coalesce(with_variable('g', {IN_MESH_CRS}, "
+        f"({angle('point_n(@g, 1)', 'point_n(@g, 2)')} + 180) % 360), \"a1\"), \"a1\")"
+    ),
+    "a2": (
+        f"if(\"AA\" = 1, coalesce(with_variable('g', {IN_MESH_CRS}, "
+        f"{angle('point_n(@g, num_points(@g) - 1)', 'point_n(@g, num_points(@g))')}), \"a2\"), \"a2\")"
+    ),
+    # A circular culvert is as wide as high
+    "LARG": 'if("CIRC" = 1, "HAUT", "LARG")',
+}
+
+# Fields computed when the automatic option is checked: not editable then
+EDITABLE = {
+    "Z1": '"AZ" IS NULL OR "AZ" != 1',
+    "Z2": '"AZ" IS NULL OR "AZ" != 1',
+    "LENGTH": '"AL" IS NULL OR "AL" != 1',
+    "a1": '"AA" IS NULL OR "AA" != 1',
+    "a2": '"AA" IS NULL OR "AA" != 1',
+    "LARG": '"CIRC" IS NULL OR "CIRC" != 1',
+}
 
 
 def line_symbol(color, dashed=False):
@@ -163,7 +215,9 @@ def main(path):
     for fld in FIELDS:
         idx = fields.lookupField(fld.name)
         layer.setFieldAlias(idx, ALIASES[fld.name])
-        if fld.name in DEFAULTS:
+        if fld.name in AUTOMATIC_DEFAULTS:
+            layer.setDefaultValueDefinition(idx, QgsDefaultValue(AUTOMATIC_DEFAULTS[fld.name], True))
+        elif fld.name in DEFAULTS:
             layer.setDefaultValueDefinition(idx, QgsDefaultValue(DEFAULTS[fld.name]))
         if fld.name == "CLAP":
             layer.setEditorWidgetSetup(idx, QgsEditorWidgetSetup("ValueMap", {"map": [{lab: v} for v, lab in VALVES]}))
@@ -193,6 +247,10 @@ def main(path):
         form.addTab(box)
     for name in ("N1", "N2"):
         form.setReadOnly(fields.lookupField(name), True)
+    for name, expression in EDITABLE.items():
+        properties = QgsPropertyCollection()
+        properties.setProperty(QgsEditFormConfig.DataDefinedProperty.Editable, QgsProperty.fromExpression(expression))
+        form.setDataDefinedFieldProperties(name, properties)
     layer.setEditFormConfig(form)
 
     category = QgsMapLayer.StyleCategory

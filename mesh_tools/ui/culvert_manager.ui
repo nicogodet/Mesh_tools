@@ -233,22 +233,22 @@ It is stored in the culvert layer.</string>
           </property>
           <layout class="QVBoxLayout" name="lay_culvert_form">
            <item>
-            <widget class="QTabWidget" name="tab_culvert">
-             <property name="documentMode">
+            <widget class="QLabel" name="lbl_selected">
+             <property name="wordWrap">
               <bool>true</bool>
              </property>
-             <property name="usesScrollButtons">
-              <bool>true</bool>
+             <property name="textFormat">
+              <enum>Qt::RichText</enum>
              </property>
             </widget>
            </item>
            <item>
-            <widget class="QPushButton" name="btn_res_val">
+            <widget class="QPushButton" name="btn_edit_culv">
              <property name="toolTip">
-              <string>Set the parameters of the selected culvert back to their default values.</string>
+              <string>Open the attribute form of the selected culvert (the layer is switched to edit mode). Nodes, automatic elevations, length and angles are updated by the form.</string>
              </property>
              <property name="text">
-              <string>Default values…</string>
+              <string>Edit the culvert…</string>
              </property>
             </widget>
            </item>

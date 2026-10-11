@@ -23,156 +23,52 @@
  ***************************************************************************/
 """
 
-import math
 import os
 import time
 
 from contextlib import suppress
+from html import escape
 
-from qgis.core import (
-    NULL,
-    Qgis,
-    QgsApplication,
-    QgsCsException,
-    QgsCoordinateTransform,
-    QgsCoordinateTransformContext,
-    QgsExpressionContextUtils,
-    QgsFeature,
-    QgsField,
-    QgsFields,
-    QgsGeometry,
-    QgsMesh,
-    QgsMeshDatasetIndex,
-    QgsPointXY,
-    QgsVectorFileWriter,
-    QgsVectorLayer,
-)
-from qgis.gui import QgsDoubleSpinBox
+from qgis.core import Qgis, QgsApplication
 from qgis.PyQt import uic
-from qgis.PyQt.QtCore import QMetaType, Qt, pyqtSignal
+from qgis.PyQt.QtCore import Qt, pyqtSignal
 from qgis.PyQt.QtGui import QStandardItem, QStandardItemModel
-from qgis.PyQt.QtWidgets import (
-    QCheckBox,
-    QComboBox,
-    QDoubleSpinBox,
-    QFileDialog,
-    QGridLayout,
-    QLabel,
-    QLineEdit,
-    QListWidgetItem,
-    QMessageBox,
-    QSpinBox,
-    QWidget,
-)
+from qgis.PyQt.QtWidgets import QFileDialog, QListWidgetItem
 
 from ..mesh_tools_dockwidget import MeshToolsDockWidget
+from . import culvert_core
 from .create_shp_dlg import dlg_create_shapefile
-from .culvert_fields import (
-    DEFAULT_OPTION,
-    FIELD_INFO,
-    FIELD_NAMES,
-    FIELDS,
-    FORM_GROUPS,
-    KIND_FLOAT,
-    KIND_INT,
-    KIND_INT_TEXT,
-    KIND_STR,
-    SOFT_TELEMAC,
-    SOFT_UHAINA,
-    VALVES,
-    used_by_option,
-)
-from .culvert_io import (
-    CulvertFileError,
-    detect_option,
-    is_null,
-    parse_value,
-    read_culvert_file,
-    validate_record,
-    write_culvert_file,
-)
+from .culvert_fields import FIELD_NAMES, SOFT_TELEMAC, SOFT_UHAINA
+from .culvert_io import CulvertFileError, is_null, write_culvert_file
 from .import_culvert_file_dlg import dlg_import_culvert_file
-from .mesh_locator import MeshNodeLocator
-from .MeshUtils import MeshUtils
 
-FORM_CLASS, _ = uic.loadUiType(
-    os.path.join(os.path.dirname(__file__), "..", "ui", "culvert_manager.ui")
-)
+FORM_CLASS, _ = uic.loadUiType(os.path.join(os.path.dirname(__file__), "..", "ui", "culvert_manager.ui"))
 
-# Layer variables holding the TELEMAC keyword OPTION FOR CULVERTS and the relaxation
-OPTION_VARIABLE = "culvert_option"
-RELAX_VARIABLE = "culvert_relaxation"
-
-COEFFICIENTS = ("CE1", "CE2", "CS1", "CS2", "L12", "CV", "C56", "CV5", "C5", "CT")
-# Spin boxes of the culvert form: (minimum, maximum, step, decimals)
-SPIN_SPECS = {
-    **{name: (0.0, 1.0, 0.1, 2) for name in COEFFICIENTS},
-    **{name: (0.0, 999999.0, 0.1, 2) for name in ("LARG", "HAUT", "HAUT2", "LENGTH")},
-    "Z1": (-99999.0, 99999.0, 0.1, 2),
-    "Z2": (-99999.0, 99999.0, 0.1, 2),
-    "d1": (0.0, 90.0, 1.0, 2),
-    "d2": (0.0, 90.0, 1.0, 2),
-    "a1": (0.0, 360.0, 1.0, 2),
-    "a2": (0.0, 360.0, 1.0, 2),
-    "FRIC": (0.0, 999999.0, 0.001, 3),
-}
-# Check boxes setting values automatically, and the widgets they drive
-AUTOMATIC = {"AZ": ("sb_z1", "sb_z2"), "AA": ("sb_a1", "sb_a2"), "AL": ("sb_length",), "CIRC": ("sb_larg",)}
-
-QT_TYPES = {
-    KIND_STR: QMetaType.Type.QString,
-    KIND_INT_TEXT: QMetaType.Type.QString,
-    KIND_FLOAT: QMetaType.Type.Double,
-    KIND_INT: QMetaType.Type.Int,
-}
+CULVERT_SIGNALS = ("selectionChanged", "editingStarted", "editingStopped", "attributeValueChanged", "geometryChanged")
 
 
 class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
+    """Control panel of the culvert layers; the culverts are edited with the attribute form of the layer."""
+
     closingTool = pyqtSignal()
 
     def __init__(self, parent=None):
         super(CulvertManager, self).__init__(parent)
         self.setupUi(self)
         self.prt = parent
-        self.path_icon = os.path.join(os.path.dirname(__file__), "..", "icons/")
-        self.file_culv_style = os.path.join(os.path.dirname(__file__), "..", "styles/culvert.qml")
-        self.ctrl_signal_blocked = False
-        self.is_writing = False
 
-        self.build_culvert_form()
+        self.lay_mesh = None
+        self.lay_culv = None
+        self.mesh = None
+        self.cur_culv_id = None
+        self.software_select = SOFT_TELEMAC
+
         self.lst_problems.hide()
         self.btn_new_culv_file.setIcon(QgsApplication.getThemeIcon("/mActionNewVectorLayer.svg"))
         self.btn_import_culv_file.setIcon(QgsApplication.getThemeIcon("/mActionFileOpen.svg"))
 
-        self.lay_mesh = None
-        self.lay_culv = None
-        # Transform from the culvert layer CRS to the mesh CRS, None if one of the layers is missing/invalid
-        self.culv_to_mesh = None
-
-        self.native_mesh = None
-        self.locator = None
-
-        self.cur_culv_id = None
-        self.cur_mesh_dataset = None
-
-        self.software_select = 0
-
-        # Col4 - Index for Telemac
-        # Col5 - Index for Uhaina
-        self.culv_flds = [
-            [f.name, QT_TYPES[f.kind], getattr(self, f.widget) if f.widget else None, f.telemac_col, f.uhaina_col]
-            for f in FIELDS
-        ]
-
         self.mdl_lay_culv = QStandardItemModel()
-
-        self.mdl_mesh_dataset = QStandardItemModel()
-
         self.cb_lay_culv.setModel(self.mdl_lay_culv)
-        self.cb_dataset_mesh.setModel(self.mdl_mesh_dataset)
-
-        # self.clickTool = QgsMapToolEmitPoint(iface.mapCanvas())
-        # self.clickTool.canvasClicked.connect(self.postSelectCulvert)
 
         self.project.layersAdded.connect(self.addLayers)
         self.project.layersRemoved.connect(self.removeLayers)
@@ -182,116 +78,27 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
         self.cb_lay_mesh.currentIndexChanged.connect(self.mesh_lay_changed)
         self.cb_lay_culv.currentIndexChanged.connect(self.culv_lay_changed)
         self.cb_dataset_mesh.currentIndexChanged.connect(self.mesh_dataset_changed)
-
-        self.btn_new_culv_file.clicked.connect(self.new_file)
-        self.btn_import_culv_file.clicked.connect(self.import_culvert)
-        self.btn_res_val.clicked.connect(self.reset_val)
-        self.btn_update_auto.clicked.connect(self.update_all_auto)
-        self.btn_verif.clicked.connect(self.verif_culvert)
-        self.btn_create_file.clicked.connect(self.create_file)
         self.cb_software_select.currentIndexChanged.connect(self.soft_changed)
         self.cb_culv_option.currentIndexChanged.connect(self.option_changed)
         self.sb_relax.valueChanged.connect(self.relax_changed)
-        self.lst_problems.itemClicked.connect(self.problem_clicked)
-        # self.btn_sel_culv.clicked.connect(self.select_culv)
 
-        for fld in self.culv_flds:
-            ctrl = fld[2]
-            if ctrl:
-                if isinstance(ctrl, QDoubleSpinBox) or isinstance(ctrl, QSpinBox):
-                    ctrl.valueChanged.connect(self.ctrl_edited)
-                elif isinstance(ctrl, QComboBox):
-                    ctrl.currentIndexChanged.connect(self.ctrl_edited)
-                elif isinstance(ctrl, QCheckBox):
-                    ctrl.stateChanged.connect(self.ctrl_edited)
-                elif isinstance(ctrl, QLineEdit):
-                    ctrl.textChanged.connect(self.ctrl_edited)
+        self.btn_new_culv_file.clicked.connect(self.new_file)
+        self.btn_import_culv_file.clicked.connect(self.import_culvert)
+        self.btn_edit_culv.clicked.connect(self.edit_culvert)
+        self.btn_update_auto.clicked.connect(self.update_all_auto)
+        self.btn_verif.clicked.connect(self.verif_culvert)
+        self.btn_create_file.clicked.connect(self.create_file)
+        self.lst_problems.itemClicked.connect(self.problem_clicked)
 
         for lay in self.project.mapLayers().values():
             self.analyse_layer(lay)
 
         self.set_mesh_layer(self.cb_lay_mesh.currentLayer())
+        self.culv_lay_changed()
 
-        if self.mdl_lay_culv.rowCount() == 0:
-            self.culv_lay_changed()
-
-    def build_culvert_form(self):
-        """Widgets of the selected culvert, one tab per group, named after culvert_fields (txt_name, sb_ce1...)."""
-        self.field_rows = {}
-        self.form_groups = []
-        fields = {fld.name: fld for fld in FIELDS}
-        for title, tooltip, names in FORM_GROUPS:
-            page = QWidget(self.tab_culvert)
-            grid = QGridLayout(page)
-            grid.setContentsMargins(4, 4, 4, 4)
-            grid.setVerticalSpacing(4)
-            row, col = 0, 0
-            for name in names:
-                alias, unit = FIELD_INFO[name]
-                field_tooltip = f"{name} : {alias}" + (f" ({unit})" if unit else "")
-                if name in ("N1", "N2"):
-                    if name == "N2":
-                        continue
-                    label = QLabel(self.tr("Nodes"), page)
-                    self.lbl_nodes = QLabel(page)
-                    self.lbl_nodes.setToolTip(self.tr("Nodes N1 and N2 of the extremities, computed from the mesh."))
-                    widget = self.lbl_nodes
-                else:
-                    widget = self.make_widget(fields[name], page)
-                    widget.setToolTip(field_tooltip)
-                    label = None if isinstance(widget, QCheckBox) else QLabel(name, page)
-                    if label is not None:
-                        label.setToolTip(field_tooltip)
-
-                if name in ("NAME", "N1", "CLAP") or isinstance(widget, QCheckBox):
-                    # Whole row
-                    if col:
-                        row, col = row + 1, 0
-                    if label is None:
-                        grid.addWidget(widget, row, 0, 1, 4)
-                    else:
-                        grid.addWidget(label, row, 0)
-                        grid.addWidget(widget, row, 1, 1, 3)
-                    row += 1
-                else:
-                    grid.addWidget(label, row, col)
-                    grid.addWidget(widget, row, col + 1)
-                    col += 2
-                    if col == 4:
-                        row, col = row + 1, 0
-                self.field_rows[name] = (label, widget)
-            grid.setColumnStretch(1, 1)
-            grid.setColumnStretch(3, 1)
-            grid.setRowStretch(row + 1, 1)
-            index = self.tab_culvert.addTab(page, self.tr(title))
-            self.tab_culvert.setTabToolTip(index, self.tr(tooltip))
-            self.form_groups.append((page, names))
-
-    def make_widget(self, fld, parent):
-        alias, unit = FIELD_INFO[fld.name]
-        if fld.name == "NAME":
-            widget = QLineEdit(parent)
-        elif fld.name == "CLAP":
-            widget = QComboBox(parent)
-            widget.addItems([self.tr(label) for _, label in VALVES])
-        elif fld.name == "NB_in_//":
-            widget = QSpinBox(parent)
-            widget.setMinimum(1)
-        elif fld.kind == KIND_INT:
-            widget = QCheckBox(self.tr(alias), parent)
-        else:
-            widget = QgsDoubleSpinBox(parent)
-            widget.setShowClearButton(False)
-            # The size hint follows the maximum value: too wide for two columns in a side panel
-            widget.setMinimumWidth(80)
-            minimum, maximum, step, decimals = SPIN_SPECS[fld.name]
-            widget.setRange(minimum, maximum)
-            widget.setSingleStep(step)
-            widget.setDecimals(decimals)
-            if unit:
-                widget.setSuffix(f" {unit}" if unit == "m" else unit)
-        setattr(self, fld.widget, widget)
-        return widget
+    ######################################################################################
+    #                                       LAYERS                                       #
+    ######################################################################################
 
     def addLayers(self, layers):
         for lay in layers:
@@ -299,156 +106,36 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
 
     def removeLayers(self, layers):
         for r in range(self.mdl_lay_culv.rowCount() - 1, -1, -1):
-            if self.mdl_lay_culv.item(r, 0).data(32) in layers:
+            if self.mdl_lay_culv.item(r, 0).data(Qt.ItemDataRole.UserRole) in layers:
                 self.mdl_lay_culv.takeRow(r)
 
     def analyse_layer(self, lay):
-        if lay.type() == Qgis.LayerType.Vector and lay.geometryType() == Qgis.GeometryType.Line:
-            flds = {f.name().lower() for f in lay.fields()}
-            if all(name.lower() in flds for name in FIELD_NAMES):
-                itm = QStandardItem()
-                itm.setData(lay.name(), 0)
-                itm.setData(lay.id(), 32)
-                self.mdl_lay_culv.appendRow(itm)
-                self.mdl_lay_culv.sort(0)
-
-    def valid_mesh_culv(self):
-        enabled = self.culv_to_mesh is not None
-        for widget in (self.btn_create_file, self.btn_verif, self.btn_update_auto, self.gb_cur_culv):
-            widget.setEnabled(enabled)
-        self.cur_culv_changed()
+        if culvert_core.is_culvert_layer(lay):
+            itm = QStandardItem()
+            itm.setData(lay.name(), Qt.ItemDataRole.DisplayRole)
+            itm.setData(lay.id(), Qt.ItemDataRole.UserRole)
+            self.mdl_lay_culv.appendRow(itm)
+            self.mdl_lay_culv.sort(0)
 
     def clean(self):
-        with suppress(RuntimeError, TypeError):
-            self.project.layersAdded.disconnect(self.addLayers)
-        with suppress(RuntimeError, TypeError):
-            self.project.layersRemoved.disconnect(self.removeLayers)
-
-        self.disconnect_mesh_layer()
+        for signal, slot in (
+            (self.project.layersAdded, self.addLayers),
+            (self.project.layersRemoved, self.removeLayers),
+            (self.cb_lay_mesh.layerChanged, self.mesh_lay_changed),
+            (self.cb_lay_mesh.currentIndexChanged, self.mesh_lay_changed),
+            (self.cb_lay_culv.currentIndexChanged, self.culv_lay_changed),
+            (self.cb_dataset_mesh.currentIndexChanged, self.mesh_dataset_changed),
+        ):
+            with suppress(RuntimeError, TypeError):
+                signal.disconnect(slot)
         self.disconnect_culv_layer()
 
-        with suppress(RuntimeError, TypeError):
-            self.cb_lay_mesh.layerChanged.disconnect(self.mesh_lay_changed)
-        with suppress(RuntimeError, TypeError):
-            self.cb_lay_mesh.currentIndexChanged.disconnect(self.mesh_lay_changed)
-        with suppress(RuntimeError, TypeError):
-            self.cb_lay_culv.currentIndexChanged.disconnect(self.culv_lay_changed)
-        with suppress(RuntimeError, TypeError):
-            self.cb_dataset_mesh.currentIndexChanged.disconnect(self.mesh_dataset_changed)
-
-    def disconnect_mesh_layer(self):
-        """Disconnect only our own slots: a bare disconnect() would also remove QGIS internal connections."""
-        if self.lay_mesh is not None:
-            with suppress(RuntimeError, TypeError):  # the layer may be already deleted
-                self.lay_mesh.crsChanged.disconnect(self.mesh_crs_changed)
-
     def disconnect_culv_layer(self):
+        """Disconnect only our own slots: a bare disconnect() would also remove QGIS internal connections."""
         if self.lay_culv is not None:
-            for signal_name, slot in (
-                ("selectionChanged", self.cur_culv_changed),
-                ("editingStarted", self.cur_culv_changed),
-                ("editingStopped", self.cur_culv_changed),
-                ("crsChanged", self.culv_crs_changed),
-            ):
+            for signal_name in CULVERT_SIGNALS:
                 with suppress(RuntimeError, TypeError):  # the layer may be already deleted
-                    getattr(self.lay_culv, signal_name).disconnect(slot)
-
-    ######################################################################################
-    #                                                                                    #
-    #                                      SOFTWARE                                      #
-    #                                                                                    #
-    ######################################################################################
-
-    def soft_changed(self):
-        self.software_select = self.cb_software_select.currentIndex()
-        self.update_widgets_state()
-
-    def culvert_option(self, layer=None):
-        """OPTION FOR CULVERTS stored in the culvert layer, 1 if not set."""
-        layer = layer or self.lay_culv
-        if layer is None:
-            return DEFAULT_OPTION
-        value = QgsExpressionContextUtils.layerScope(layer).variable(OPTION_VARIABLE)
-        try:
-            return 2 if int(value) == 2 else 1
-        except (TypeError, ValueError):
-            return DEFAULT_OPTION
-
-    def set_culvert_option(self, layer, option):
-        QgsExpressionContextUtils.setLayerVariable(layer, OPTION_VARIABLE, option)
-        if layer is self.lay_culv:
-            self.show_culvert_option()
-
-    def show_culvert_option(self):
-        self.cb_culv_option.blockSignals(True)
-        self.cb_culv_option.setCurrentIndex(self.culvert_option() - 1)
-        self.cb_culv_option.blockSignals(False)
-
-        relax = None
-        if self.lay_culv is not None:
-            relax = QgsExpressionContextUtils.layerScope(self.lay_culv).variable(RELAX_VARIABLE)
-        if relax not in (None, ""):
-            self.sb_relax.blockSignals(True)
-            self.sb_relax.setValue(float(relax))
-            self.sb_relax.blockSignals(False)
-        self.update_widgets_state()
-
-    def relax_changed(self):
-        if self.lay_culv is not None:
-            QgsExpressionContextUtils.setLayerVariable(self.lay_culv, RELAX_VARIABLE, self.sb_relax.value())
-
-    def option_changed(self):
-        if self.lay_culv is not None:
-            QgsExpressionContextUtils.setLayerVariable(
-                self.lay_culv, OPTION_VARIABLE, self.cb_culv_option.currentIndex() + 1
-            )
-        self.update_widgets_state()
-
-    def update_widgets_state(self):
-        """Hide the parameters not used by the software and the culvert option, grey the automatic ones."""
-        telemac = self.software_select == SOFT_TELEMAC
-        option = self.cb_culv_option.currentIndex() + 1
-        circular = self.cb_circ.isChecked()
-        fields = {fld.name: fld for fld in FIELDS}
-        for page, names in self.form_groups:
-            any_shown = False
-            for name in names:
-                if name not in self.field_rows:
-                    continue
-                fld = fields[name]
-                if name in ("N1", "N2"):
-                    used = telemac
-                elif name == "AL":
-                    # The automatic length only matters when the length is used
-                    used = fields["LENGTH"].col(self.software_select) is not None and (
-                        not telemac or used_by_option("LENGTH", option)
-                    )
-                else:
-                    used = fld.col(self.software_select) is not None
-                    if telemac and name != "LARG":
-                        used = used and used_by_option(name, option, circular)
-                label, widget = self.field_rows[name]
-                for item in (label, widget):
-                    if item is not None:
-                        item.setVisible(used)
-                widget.setEnabled(True)
-                any_shown = any_shown or used
-            self.tab_culvert.setTabVisible(self.tab_culvert.indexOf(page), any_shown)
-
-        # LARG stays visible for circular culverts: it follows the height
-        for name, widget_names in AUTOMATIC.items():
-            if getattr(self, fields[name].widget).isChecked():
-                for widget_name in widget_names:
-                    getattr(self, widget_name).setEnabled(False)
-
-        for widget in (self.cb_culv_option, self.lbl_culv_option, self.sb_relax, self.lbl_relax):
-            widget.setVisible(telemac)
-
-    ######################################################################################
-    #                                                                                    #
-    #                                     MESH LAYER                                     #
-    #                                                                                    #
-    ######################################################################################
+                    getattr(self.lay_culv, signal_name).disconnect(self.cur_culv_changed)
 
     def mesh_lay_changed(self, *_):
         # QGIS 4 emits layerChanged(None) before the combo box is updated: the layer is read from the combo box,
@@ -458,222 +145,119 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
             self.set_mesh_layer(layer)
 
     def set_mesh_layer(self, layer):
-        self.disconnect_mesh_layer()
-
         self.lay_mesh = layer
+        self.mesh = None
+        if layer is not None:
+            t0 = time.time()
+            self.mesh = culvert_core.mesh_context(layer)
+            self.writeInfo(self.tr("Mesh {} ready in {} sec.").format(layer.name(), round(time.time() - t0, 1)))
+            if not layer.crs().isValid():
+                self.writeError(self.tr("Mesh CRS is not valid."))
+            if self.lay_culv is not None:
+                culvert_core.set_layer_settings(self.lay_culv, mesh=layer.id())
+        self.fill_datasets()
+        self.update_state()
 
-        if self.lay_mesh:
-            self.lay_mesh.crsChanged.connect(self.mesh_crs_changed)
-            self.cb_dataset_mesh.setEnabled(True)
-        else:
-            self.lay_mesh = None
-            self.native_mesh = None
-            self.locator = None
-            self.cb_dataset_mesh.setEnabled(False)
-        self.cur_mesh_changed()
-
-    def update_transforms(self):
-        """The node lookup works in the CRS of the mesh: nothing depends on the CRS of the project."""
-        self.culv_to_mesh = None
-
-        if self.lay_mesh is None:
-            return
-
-        if not self.lay_mesh.crs().isValid():
-            self.writeError(self.tr("Mesh CRS is not valid."))
-            return
-
-        if self.lay_culv is None:
-            return
-
-        if not self.lay_culv.crs().isValid():
-            self.writeWarning(self.tr("Culvert layer CRS is not valid."))
-            return
-
-        self.culv_to_mesh = QgsCoordinateTransform(self.lay_culv.crs(), self.lay_mesh.crs(), self.project)
-
-    def mesh_crs_changed(self):
-        self.update_transforms()
-        self.valid_mesh_culv()
-
-    def cur_mesh_changed(self):
-        self.mdl_mesh_dataset.clear()
-        self.update_transforms()
-        if self.lay_mesh is None:
-            self.valid_mesh_culv()
-            return
-
-        self.writeInfo(self.tr("Current mesh changed : {}").format(self.lay_mesh.name()))
-        self.native_mesh = QgsMesh()
-        self.lay_mesh.dataProvider().populateMesh(self.native_mesh)
-
-        self.writeInfo(self.tr("Creation of faces spatial index..."))
-        t0 = time.time()
-        self.locator = MeshNodeLocator(self.native_mesh)
-        self.writeInfo(
-            self.tr("Faces spatial index created in {} sec.").format(round(time.time() - t0, 1))
-        )
-
-        self.valid_mesh_culv()
-
+    def fill_datasets(self):
+        """Datasets usable for the elevations; the one stored in the culvert layer, or the bottom, is selected."""
         self.cb_dataset_mesh.blockSignals(True)
-        mesh_prov = self.lay_mesh.dataProvider()
-        indexFound = None
-        for i in range(mesh_prov.datasetGroupCount()):
-            metadata = mesh_prov.datasetGroupMetadata(i)
-            # Z is read at the nodes: other datasets would give wrong values
-            if not MeshUtils.isScalarOnVertices(metadata):
-                continue
-            itm = QStandardItem()
-            datasetName = metadata.name()
-            itm.setData(datasetName, 0)
-            itm.setData(i, 32)
-            self.mdl_mesh_dataset.appendRow(itm)
-
-            if indexFound is None and is_bottom_dataset(datasetName):
-                indexFound = self.mdl_mesh_dataset.rowCount() - 1
-
-        if indexFound is not None:
-            self.cb_dataset_mesh.setCurrentIndex(indexFound)
-
+        self.cb_dataset_mesh.clear()
+        if self.mesh is not None:
+            for index, name in self.mesh.usable_datasets():
+                self.cb_dataset_mesh.addItem(name, index)
+            wanted = culvert_core.layer_setting(self.lay_culv, culvert_core.BOTTOM_VARIABLE)
+            position = self.cb_dataset_mesh.findText(wanted) if wanted else -1
+            if position < 0:
+                position = self.cb_dataset_mesh.findText(self.mesh.default_dataset() or "")
+            self.cb_dataset_mesh.setCurrentIndex(max(position, 0))
         self.cb_dataset_mesh.blockSignals(False)
+        self.cb_dataset_mesh.setEnabled(self.cb_dataset_mesh.count() > 0)
         self.mesh_dataset_changed()
 
     def mesh_dataset_changed(self):
-        self.cur_mesh_dataset = self.cb_dataset_mesh.currentData(32)
-        if self.lay_mesh is not None and self.cur_mesh_dataset is not None:
-            self.writeInfo(
-                self.tr("Current mesh dataset changed : {}").format(
-                    self.cb_dataset_mesh.currentText()
-                )
-            )
+        if self.lay_culv is not None and self.cb_dataset_mesh.currentText():
+            culvert_core.set_layer_settings(self.lay_culv, bottom=self.cb_dataset_mesh.currentText())
+        self.cur_culv_changed()
 
-    ######################################################################################
-    #                                                                                    #
-    #                                    CULVERT LAYER                                   #
-    #                                                                                    #
-    ######################################################################################
-
-    def new_file(self):
-        srs_mesh = None
-        path = ""
-        if self.lay_mesh:
-            srs_mesh = self.lay_mesh.crs()
-        dlg = dlg_create_shapefile(self.tr("culvert"), srs_mesh, self)
-        dlg.setWindowModality(Qt.WindowModality.WindowModal)
-        if dlg.exec():
-            path, crs = dlg.cur_shp, dlg.cur_crs
-        if path:
-            self.create_new_shp(path, crs)
-
-    def write_vector_file(self, layer, path, name=None):
-        """Save a layer as a shapefile or as a layer of a GeoPackage, whose other layers are kept.
-
-        Return the source of the saved layer, None if it failed.
-        """
-        extension = os.path.splitext(path)[1].lstrip(".").lower()
-        driver = QgsVectorFileWriter.driverForExtension(extension) or "ESRI Shapefile"
-        name = name or os.path.splitext(os.path.basename(path))[0]
-
-        options = QgsVectorFileWriter.SaveVectorOptions()
-        options.driverName = driver
-        options.fileEncoding = "utf-8"
-        source = path
-        if driver == "GPKG":
-            options.layerName = name
-            if os.path.exists(path):
-                options.actionOnExistingFile = QgsVectorFileWriter.ActionOnExistingFile.CreateOrOverwriteLayer
-            source = f"{path}|layername={name}"
-
-        result = QgsVectorFileWriter.writeAsVectorFormatV2(
-            layer=layer,
-            fileName=path,
-            transformContext=QgsCoordinateTransformContext(),
-            options=options,
-        )
-        if result[0] != Qgis.VectorExportResult.Success:
-            self.writeError(self.tr("Error during culvert file creation : {}").format(result[1]))
-            return None
-        return source
-
-    def add_culvert_layer(self, source, crs):
-        """Load a saved culvert layer with its style, and select it."""
-        name = os.path.splitext(os.path.basename(source.split("|")[0]))[0]
-        layer = QgsVectorLayer(source, name, "ogr")
-        if not layer.isValid():
-            self.writeError(self.tr("Created culvert layer is not valid."))
-            return None
-        layer.setCrs(crs)
-        layer.loadNamedStyle(self.file_culv_style)
-        layer.saveDefaultStyle()
-        self.project.addMapLayer(layer)
-        self.cb_lay_culv.setCurrentIndex(self.cb_lay_culv.findData(layer.id(), 32))
-        return layer
-
-    def create_new_shp(self, path, crs):
-        layerFields = QgsFields()
-        for fld in self.culv_flds:
-            layerFields.append(QgsField(fld[0], fld[1]))
-
-        tmp_lay = QgsVectorLayer(f"MultiLineString?crs={crs.authid()}", "", "memory")
-        pr = tmp_lay.dataProvider()
-        pr.addAttributes(layerFields)
-        tmp_lay.updateFields()
-
-        source = self.write_vector_file(tmp_lay, path)
-        if source is not None:
-            return self.add_culvert_layer(source, crs)
-        return None
+    def dataset_group(self):
+        return self.cb_dataset_mesh.currentData()
 
     def culv_lay_changed(self, *_):
         self.disconnect_culv_layer()
+        lay_id = self.cb_lay_culv.currentData(Qt.ItemDataRole.UserRole)
+        self.lay_culv = self.project.mapLayer(lay_id) if lay_id else None
+        if self.lay_culv is not None:
+            for signal_name in CULVERT_SIGNALS:
+                getattr(self.lay_culv, signal_name).connect(self.cur_culv_changed)
+            self.load_layer_settings()
+        self.update_state()
 
-        lay_id = self.cb_lay_culv.currentData(32)
-        self.cur_culv_id = None
-        if lay_id:
-            self.lay_culv = self.project.mapLayer(lay_id)
-            self.lay_culv.selectionChanged.connect(self.cur_culv_changed)
-            self.lay_culv.editingStarted.connect(self.cur_culv_changed)
-            self.lay_culv.editingStopped.connect(self.cur_culv_changed)
-            self.lay_culv.crsChanged.connect(self.culv_crs_changed)
-            self.update_transforms()
-            self.show_culvert_option()
+    def load_layer_settings(self):
+        """Show the settings stored in the culvert layer and select its mesh; store the current ones if missing."""
+        layer = self.lay_culv
+        mesh = culvert_core.mesh_layer(culvert_core.layer_setting(layer, culvert_core.MESH_VARIABLE))
+        if mesh is not None and mesh is not self.lay_mesh:
+            self.cb_lay_mesh.setLayer(mesh)
+            self.set_mesh_layer(mesh)
         else:
-            self.lay_culv = None
-            self.update_transforms()
-        self.valid_mesh_culv()
+            if self.lay_mesh is not None:
+                culvert_core.set_layer_settings(layer, mesh=self.lay_mesh.id())
+            self.fill_datasets()
 
-    def culv_crs_changed(self):
-        self.update_transforms()
-        self.valid_mesh_culv()
+        self.cb_culv_option.blockSignals(True)
+        self.cb_culv_option.setCurrentIndex(culvert_core.culvert_option(layer) - 1)
+        self.cb_culv_option.blockSignals(False)
+        self.sb_relax.blockSignals(True)
+        self.sb_relax.setValue(culvert_core.culvert_relaxation(layer))
+        self.sb_relax.blockSignals(False)
 
-    def cur_culv_changed(self):
-        if self.is_writing:
-            return
+    ######################################################################################
+    #                                   COMPUTATION                                      #
+    ######################################################################################
 
-        if self.lay_culv:
-            if self.lay_culv.selectedFeatureCount() == 1:
-                self.cur_culv_id = self.lay_culv.selectedFeatureIds()[0]
-            else:
-                self.cur_culv_id = None
-        else:
-            self.cur_culv_id = None
-        self.display_culv_info()
+    def soft_changed(self):
+        self.software_select = self.cb_software_select.currentIndex()
+        self.update_state()
 
-    def display_culv_info(self):
-        if self.lay_culv and self.cur_culv_id is not None:
-            self.fill_info()
-            name = self.culvert_name(self.lay_culv.getFeature(self.cur_culv_id))
-            self.gb_cur_culv.setTitle(self.tr("Selected culvert : {}").format(name))
-            self.gb_cur_culv.setEnabled(not self.lay_culv.isEditable() and self.culv_to_mesh is not None)
-        else:
-            self.gb_cur_culv.setTitle(self.tr("Selected culvert"))
-            self.clear_info()
-            self.gb_cur_culv.setEnabled(False)
-        self.update_status()
+    def option_changed(self):
+        if self.lay_culv is not None:
+            culvert_core.set_layer_settings(self.lay_culv, option=self.cb_culv_option.currentIndex() + 1)
+        self.cur_culv_changed()
+
+    def relax_changed(self):
+        if self.lay_culv is not None:
+            culvert_core.set_layer_settings(self.lay_culv, relaxation=self.sb_relax.value())
+
+    def culvert_option(self, layer=None):
+        return culvert_core.culvert_option(layer or self.lay_culv)
+
+    def set_culvert_option(self, layer, option):
+        culvert_core.set_layer_settings(layer, option=option)
+        if layer is self.lay_culv:
+            self.load_layer_settings()
+
+    ######################################################################################
+    #                                   STATE / STATUS                                   #
+    ######################################################################################
+
+    def ready(self):
+        """True if the culverts can be checked against the mesh."""
+        return (
+            self.mesh is not None
+            and self.lay_culv is not None
+            and self.mesh.transform_from(self.lay_culv.crs()) is not None
+        )
+
+    def update_state(self):
+        telemac = self.software_select == SOFT_TELEMAC
+        for widget in (self.cb_culv_option, self.lbl_culv_option, self.sb_relax, self.lbl_relax):
+            widget.setVisible(telemac)
+        for widget in (self.btn_create_file, self.btn_verif, self.btn_update_auto):
+            widget.setEnabled(self.ready())
+        self.cur_culv_changed()
 
     def status_message(self):
-        """What the user has to do before editing a culvert, empty if nothing."""
+        """What the user has to do, empty if nothing."""
         if self.lay_mesh is None:
             return self.tr("Select a mesh layer.")
         if not self.lay_mesh.crs().isValid():
@@ -682,323 +266,104 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
             return self.tr("Select, create or import a culvert layer.")
         if not self.lay_culv.crs().isValid():
             return self.tr("The culvert layer has no valid CRS.")
-        if self.lay_culv.isEditable():
-            return self.tr(
-                "The culvert layer is being edited: change the culverts with the attribute form, "
-                "or stop editing to use this panel."
-            )
         count = self.lay_culv.selectedFeatureCount()
         if count == 0:
-            return self.tr("Select a culvert on the map to see and change its parameters.")
+            return self.tr("Select a culvert on the map to see and edit it.")
         if count > 1:
-            return self.tr("{} culverts are selected: select only one to change its parameters.").format(count)
+            return self.tr("{} culverts are selected: select only one to edit it.").format(count)
         return ""
 
-    def update_status(self):
+    def cur_culv_changed(self, *_):
+        layer = self.lay_culv
+        single = layer is not None and layer.selectedFeatureCount() == 1
+        self.cur_culv_id = layer.selectedFeatureIds()[0] if single else None
+
         message = self.status_message()
         self.lbl_status.setText(message)
         self.lbl_status.setVisible(bool(message))
 
-    def clear_info(self):
-        self.lbl_nodes.setText("")
-        self.ctrl_signal_blocked = True
-        for fld in self.culv_flds:
-            ctrl = fld[2]
-            if ctrl:
-                if isinstance(ctrl, QDoubleSpinBox):
-                    ctrl.setValue(0.0)
-                elif isinstance(ctrl, QSpinBox):
-                    ctrl.setValue(1)
-                elif isinstance(ctrl, QComboBox):
-                    ctrl.setCurrentIndex(0)
-                elif isinstance(ctrl, QCheckBox):
-                    ctrl.setCheckState(Qt.CheckState.Unchecked)
-                elif isinstance(ctrl, QLineEdit):
-                    ctrl.setText("")
-        self.ctrl_signal_blocked = False
-        self.update_widgets_state()
+        self.gb_cur_culv.setEnabled(self.cur_culv_id is not None)
+        if self.cur_culv_id is None:
+            self.gb_cur_culv.setTitle(self.tr("Selected culvert"))
+            self.lbl_selected.setText("")
+            return
 
-    def fill_info(self):
-        self.ctrl_signal_blocked = True
-        ft = self.lay_culv.getFeature(self.cur_culv_id)
-        nodes = ["-" if is_null(ft[name]) else str(ft[name]) for name in ("N1", "N2")]
-        self.lbl_nodes.setText(" → ".join(nodes))
-        for fld in self.culv_flds:
-            if fld[2]:
-                self.display_info(fld[2], ft[fld[0]])
-        self.ctrl_signal_blocked = False
-        self.update_widgets_state()
+        feature = layer.getFeature(self.cur_culv_id)
+        self.gb_cur_culv.setTitle(self.tr("Selected culvert : {}").format(culvert_core.culvert_name(feature)))
+        self.lbl_selected.setText(self.culvert_summary(feature))
 
-    def display_info(self, ctrl, val):
-        if isinstance(ctrl, QDoubleSpinBox):
-            if is_null(val):
-                ctrl.setValue(0.0)
-            else:
-                ctrl.setValue(val)
-        elif isinstance(ctrl, QSpinBox):
-            if is_null(val):
-                ctrl.setValue(1)
-            else:
-                ctrl.setValue(val)
-        elif isinstance(ctrl, QComboBox):
-            idx = to_integer(val)
-            if idx is None:
-                ctrl.setCurrentIndex(0)
-            else:
-                ctrl.setCurrentIndex(idx)
-        elif isinstance(ctrl, QCheckBox):
-            if not is_null(val) and val == 1:
-                ctrl.setCheckState(Qt.CheckState.Checked)
-            else:
-                ctrl.setCheckState(Qt.CheckState.Unchecked)
-        elif isinstance(ctrl, QLineEdit):
-            ctrl.setText("" if is_null(val) else str(val))
+    def culvert_summary(self, feature):
+        """Nodes and elevations computed now from the mesh, and the problems of the culvert."""
+        if not self.ready():
+            return ""
+        culv_to_mesh = self.mesh.transform_from(self.lay_culv.crs())
+        values, _ = culvert_core.auto_values(self.mesh, culv_to_mesh, feature, self.dataset_group())
+        stored = culvert_core.record_from_feature(feature)
 
-    def write_attributes(self, attrs):
-        """Write {feature id: {field index: value}} through the edit buffer of the layer.
+        def show(name):
+            value = values.get(name, stored.get(name))
+            if value is None or is_null(value):
+                return "-"
+            return f"{value:.2f}" if isinstance(value, float) else str(value)
 
-        The layer and its attribute table are notified. If the user is already editing the layer, the changes stay
-        in the buffer (one undo step) and are never committed for them, otherwise they are committed at once.
-        """
-        layer = self.lay_culv
-        was_editing = layer.isEditable()
+        lines = [
+            escape(self.tr("Nodes {} → {}").format(show("N1"), show("N2"))),
+            escape(self.tr("Elevations {} → {} m").format(show("Z1"), show("Z2"))),
+        ]
+        _, problems = culvert_core.export_records(
+            self.lay_culv,
+            self.mesh,
+            self.dataset_group(),
+            self.software_select,
+            self.culvert_option(),
+            features=[feature],
+        )
+        lines += [f"<span style='color:#c0392b'>{escape(message)}</span>" for _, message, _ in problems]
+        if self.lay_culv.isEditable() and self.lay_culv.isModified():
+            lines.append(f"<i>{escape(self.tr('Unsaved edits in the culvert layer.'))}</i>")
+        return "<br>".join(lines)
 
-        # Starting and stopping the edition would refresh and disable the form while the user is typing in it
-        self.is_writing = True
-        try:
-            if not was_editing and not layer.startEditing():
-                self.writeError(self.tr("The culvert layer cannot be edited."))
-                return False
+    ######################################################################################
+    #                                      ACTIONS                                       #
+    ######################################################################################
 
-            layer.beginEditCommand(self.tr("Culvert Manager"))
-            for fid, values in attrs.items():
-                for idx, value in values.items():
-                    layer.changeAttributeValue(fid, idx, value)
-            layer.endEditCommand()
-
-            if not was_editing and not layer.commitChanges():
-                errors = " ".join(layer.commitErrors())
-                self.writeError(self.tr("Error when saving the culvert layer : {}").format(errors))
-                layer.rollBack()
-                return False
-        finally:
-            self.is_writing = False
-        return True
-
-    def field_index(self, name):
-        return self.lay_culv.fields().lookupField(name)
-
-    def ctrl_edited(self):
-        ft = None
-        if not self.ctrl_signal_blocked:
-            if self.cur_culv_id is not None:
-                ft = self.lay_culv.getFeature(self.cur_culv_id)
-
-                ctrl = self.sender()
-                val = widget_value(ctrl)
-
-                field_idx = None
-                for idx in range(len(self.culv_flds)):
-                    if ctrl == self.culv_flds[idx][2]:
-                        field_name = self.culv_flds[idx][0]
-                        field_idx = self.field_index(field_name)
-                        break
-
-                if field_idx is not None:
-                    self.write_attributes({self.cur_culv_id: {field_idx: val}})
-
-        if ft is not None and self.sender() in (self.cb_auto_z, self.cb_auto_a, self.cb_auto_l):
-            # The automatic option has just been written
-            values, errors = self.auto_values(self.lay_culv.getFeature(self.cur_culv_id))
-            for error in errors:
-                self.writeError(self.tr("Error on automatic values calculation : {}").format(error))
-        else:
-            values = {}
-
-        if self.sender() == self.cb_auto_z:
-            self.update_widgets_state()
-            if ft is not None:
-                nodes = {self.field_index(name): values[name] for name in ("N1", "N2") if values.get(name) is not None}
-                self.write_attributes({self.cur_culv_id: nodes})
-                for name, spinbox in (("Z1", self.sb_z1), ("Z2", self.sb_z2)):
-                    if name in values:
-                        spinbox.setValue(values[name])
-
-        if self.sender() == self.cb_auto_a:
-            self.update_widgets_state()
-            if "a1" in values:
-                self.sb_a1.setValue(values["a1"])
-                self.sb_a2.setValue(values["a2"])
-
-        if self.sender() == self.cb_auto_l:
-            self.update_widgets_state()
-            if "LENGTH" in values:
-                self.sb_length.setValue(values["LENGTH"])
-
-        if self.sender() == self.cb_circ:
-            self.update_widgets_state()
-            if ft and (self.cb_circ.isChecked()):
-                self.sb_larg.setValue(self.sb_haut1.value())
-        if self.sender() == self.sb_haut1 and self.cb_circ.isChecked():
-            self.sb_larg.setValue(self.sb_haut1.value())
-
-    def reset_val(self):
+    def edit_culvert(self):
+        """Attribute form of the selected culvert: it updates the automatic values (default value expressions)."""
         if self.cur_culv_id is None:
             return
-        answer = QMessageBox.question(
-            self,
-            self.tr("Default values"),
-            self.tr("Set the parameters of the selected culvert back to their default values?"),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if answer != QMessageBox.StandardButton.Yes:
+        if not self.lay_culv.isEditable() and not self.lay_culv.startEditing():
+            self.writeError(self.tr("The culvert layer cannot be edited."))
             return
-
-        # The widgets are only updated here, then all the values are written at once
-        self.ctrl_signal_blocked = True
-        attrs = {}
-        for fld in self.culv_flds:
-            ctrl = fld[2]
-            if ctrl:
-                if isinstance(ctrl, QDoubleSpinBox):
-                    if ctrl in [self.sb_ce1, self.sb_ce2]:
-                        ctrl.setValue(0.5)
-                    elif ctrl in [self.sb_cs1, self.sb_cs2, self.sb_l12]:
-                        ctrl.setValue(1.0)
-                    else:
-                        ctrl.setValue(0.0)
-                elif isinstance(ctrl, QSpinBox):
-                    ctrl.setValue(1)
-                elif isinstance(ctrl, QComboBox):
-                    ctrl.setCurrentIndex(0)
-                elif isinstance(ctrl, QCheckBox):
-                    ctrl.setCheckState(Qt.CheckState.Unchecked)
-                else:
-                    continue
-                if self.lay_culv is not None:
-                    attrs[self.field_index(fld[0])] = widget_value(ctrl)
-        self.ctrl_signal_blocked = False
-        self.update_widgets_state()
-
-        if attrs:
-            self.write_attributes({self.cur_culv_id: attrs})
-
-    def mesh_vertices(self, ft):
-        """Vertices of the culvert in the CRS of the mesh, None if the culvert is not valid or cannot be converted."""
-        vertices = MeshUtils.lineVertices(ft.geometry())
-        if len(vertices) < 2 or self.culv_to_mesh is None:
-            return None
-        try:
-            return [self.culv_to_mesh.transform(vertex) for vertex in vertices]
-        except QgsCsException:
-            return None
-
-    def nodes_of_feature(self, ft):
-        """((N1, N2), error) of the extremities of a culvert."""
-        vertices = self.mesh_vertices(ft)
-        if vertices is None or self.locator is None:
-            return (None, None), self.tr("The culvert geometry is not valid or cannot be converted to the mesh CRS.")
-
-        nodes = []
-        error = None
-        for vertex in (vertices[0], vertices[-1]):
-            node, err = self.locator.nearest_node(vertex)
-            if err is not None:
-                error = err
-            nodes.append(node)
-        return tuple(nodes), error
-
-    def auto_values(self, ft):
-        """Values computed from the geometry and the mesh, as ({field name: value}, [error messages]).
-
-        N1 and N2 are always computed (None if the extremity is not within the mesh), Z, LENGTH and the angles
-        only for the culverts where the automatic option (AZ, AL, AA) is checked.
-        """
-        (n1, n2), err = self.nodes_of_feature(ft)
-        values = {"N1": n1, "N2": n2}
-        errors = [] if err is None else [err]
-
-        vertices = self.mesh_vertices(ft)
-        if vertices is None:
-            return values, errors
-
-        if ft["AZ"] == 1 and err is None:
-            if self.mesh_ready():
-                for name, node in (("Z1", n1), ("Z2", n2)):
-                    z = MeshUtils.zFromN(self.lay_mesh, self.mesh_dataset_index(), node)
-                    if z is None:
-                        errors.append(self.tr("There is no value in the dataset at node {}.").format(node))
-                    else:
-                        values[name] = z
-            else:
-                errors.append(self.tr("No valid mesh dataset."))
-
-        if ft["AL"] == 1:
-            values["LENGTH"] = sum(p1.distance(p2) for p1, p2 in zip(vertices[:-1], vertices[1:]))
-
-        if ft["AA"] == 1:
-            values["a1"], values["a2"] = calculangle(vertices)
-
-        return values, errors
-
-    def culvert_name(self, ft):
-        name = ft["NAME"]
-        if is_null(name) or name in [NULL, ""]:
-            return self.tr("Nameless culvert (feature id {})").format(ft.id())
-        return name
-
-    def mesh_dataset_index(self):
-        # Static dataset, e.g. the bottom elevation
-        return QgsMeshDatasetIndex(self.cur_mesh_dataset, 0)
-
-    def mesh_ready(self):
-        """True if the node lookup and the dataset used for Z are available."""
-        return (
-            self.lay_mesh is not None
-            and self.locator is not None
-            and self.cur_mesh_dataset is not None
-            and self.lay_mesh.dataProvider().datasetCount(self.cur_mesh_dataset) > 0
-        )
+        self.iface.openFeatureForm(self.lay_culv, self.lay_culv.getFeature(self.cur_culv_id), False, False)
 
     def update_all_auto(self):
-        if self.lay_mesh is None or self.locator is None or self.culv_to_mesh is None:
+        if not self.ready():
             self.writeError(self.tr("Import a mesh first."))
             return
-
-        attrs = dict()
-        success = True
-        for ft in self.lay_culv.getFeatures():
-            values, errors = self.auto_values(ft)
-            for error in errors:
-                success = False
-                self.writeError(self.tr("{} : {}").format(self.culvert_name(ft), error))
-
-            attrs[ft.id()] = {
-                self.field_index(name): (NULL if value is None else value) for name, value in values.items()
-            }
-
-        self.write_attributes(attrs)
-        if success:
+        problems = culvert_core.update_auto_values(self.lay_culv, self.mesh, self.dataset_group(), self.project)
+        self.show_problems(problems)
+        if not problems:
             self.writeSuccess(self.tr("Automatic values updated"))
-        self.display_culv_info()
+        self.cur_culv_changed()
 
-    ######################################################################################
-    #                                                                                    #
-    #                                       EXPORT                                       #
-    #                                                                                    #
-    ######################################################################################
+    def export_records(self):
+        if not self.ready():
+            name = self.lay_culv.name() if self.lay_culv else ""
+            return [], [[name, self.tr("Import a mesh first."), None]]
+        return culvert_core.export_records(
+            self.lay_culv, self.mesh, self.dataset_group(), self.software_select, self.culvert_option(), self.project
+        )
 
     def verif_culvert(self):
         if not self.lay_culv:
             return
-
-        records, invalidIds = self.export_records()
-        self.show_problems(invalidIds)
-        if not invalidIds:
+        _, problems = self.export_records()
+        self.show_problems(problems)
+        if not problems:
             self.writeSuccess(self.tr("All culverts are valid"))
 
     def show_problems(self, problems):
-        """List the problems found by the check; a click selects the culvert."""
+        """List the problems found; a click selects the culvert."""
         self.lst_problems.clear()
         for name, message, fid in problems:
             item = QListWidgetItem(f"{name} : {message}")
@@ -1016,31 +381,18 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
         self.canvas.zoomToFeatureIds(self.lay_culv, [fid])
         self.canvas.flashFeatureIds(self.lay_culv, [fid])
 
-    def record_from_feature(self, ft):
-        """Feature attributes as a dict for culvert_io, NULL being None."""
-        record = {}
-        for fld in self.culv_flds:
-            value = ft[fld[0]]
-            record[fld[0]] = None if is_null(value) or value == NULL else value
-        return record
-
     def create_file(self):
         if not self.lay_culv:
             return
-
-        records, invalidIds = self.export_records()
-        self.show_problems(invalidIds)
-        if invalidIds:
+        records, problems = self.export_records()
+        self.show_problems(problems)
+        if problems:
             self.writeError(self.tr("File creation is not possible, some culverts are not valid"))
             return
 
-        culv_file_name, _ = QFileDialog.getSaveFileName(
-            self, self.tr("Culvert file"), "", self.tr("Text File (*.txt)")
-        )
-
+        culv_file_name, _ = QFileDialog.getSaveFileName(self, self.tr("Culvert file"), "", self.tr("Text File (*.txt)"))
         if not culv_file_name:
             return
-
         try:
             write_culvert_file(
                 culv_file_name, records, self.software_select, self.sb_relax.value(), self.culvert_option()
@@ -1048,258 +400,100 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
         except (CulvertFileError, OSError) as err:
             self.writeError(self.tr("Error during culvert file creation : {}").format(err))
             return
-
         self.writeSuccess(self.tr("Culvert File Created"))
 
-    def export_records(self):
-        """Records of the culverts as written in the file, and the list of [culvert name, problem].
-
-        Nothing is read from the automatic fields: nodes, Z, length and angles are computed again, so the file
-        always matches the mesh and the geometries, and the layer is not modified.
-        """
-        records = []
-        problems = []
-        if self.culv_to_mesh is None or self.locator is None:
-            return records, [[self.lay_culv.name(), self.tr("Import a mesh first."), None]]
-
-        for ft in self.lay_culv.getFeatures():
-            name = self.culvert_name(ft)
-            record = self.record_from_feature(ft)
-
-            values, errors = self.auto_values(ft)
-            record.update(values)
-            problems += [[name, error, ft.id()] for error in errors]
-
-            # One line per kind of problem and culvert, to keep the list short
-            invalid, not_positive = [], []
-            for code, field_name in validate_record(record, self.software_select, self.culvert_option()):
-                (not_positive if code == "not_positive" else invalid).append(field_name)
-            if invalid:
-                message = self.tr("Values missing or not correct: {}.").format(", ".join(invalid))
-                problems.append([name, message, ft.id()])
-            if not_positive:
-                message = self.tr("Values that must be strictly positive: {}.").format(", ".join(not_positive))
-                problems.append([name, message, ft.id()])
-
-            vertices = self.mesh_vertices(ft)
-            if vertices is not None:
-                record["_xy"] = (vertices[0].x(), vertices[0].y(), vertices[-1].x(), vertices[-1].y())
-            records.append(record)
-
-        return records, problems
-
     ######################################################################################
-    #                                                                                    #
-    #                                       IMPORT                                       #
-    #                                                                                    #
+    #                                  NEW / IMPORT                                      #
     ######################################################################################
+
+    def new_file(self):
+        crs = self.lay_mesh.crs() if self.lay_mesh else None
+        dlg = dlg_create_shapefile(self.tr("culvert"), crs, self)
+        dlg.setWindowModality(Qt.WindowModality.WindowModal)
+        if dlg.exec() and dlg.cur_shp:
+            self.create_new_shp(dlg.cur_shp, dlg.cur_crs)
+
+    def write_vector_file(self, layer, path, name=None):
+        source, error = culvert_core.write_vector_file(layer, path, name)
+        if error:
+            self.writeError(self.tr("Error during culvert file creation : {}").format(error))
+        return source
+
+    def add_culvert_layer(self, layer, settings=None):
+        """Add a culvert layer to the project with the style and its settings, and select it."""
+        culvert_core.apply_style(layer)
+        settings = dict(settings or {})
+        if self.lay_mesh is not None:
+            settings.setdefault("mesh", self.lay_mesh.id())
+        if self.cb_dataset_mesh.currentText():
+            settings.setdefault("bottom", self.cb_dataset_mesh.currentText())
+        culvert_core.set_layer_settings(layer, **settings)
+        self.project.addMapLayer(layer)
+        self.cb_lay_culv.setCurrentIndex(self.cb_lay_culv.findData(layer.id(), Qt.ItemDataRole.UserRole))
+        return layer
+
+    def create_new_shp(self, path, crs):
+        source = self.write_vector_file(culvert_core.memory_culvert_layer(crs), path)
+        if source is None:
+            return None
+        layer = culvert_core.load_culvert_layer(source, crs)
+        if layer is None:
+            self.writeError(self.tr("Created culvert layer is not valid."))
+            return None
+        return self.add_culvert_layer(layer)
 
     def import_culvert(self):
         if not self.lay_mesh:
             self.writeError(self.tr("Import a mesh first."))
             return
-
-        if self.lay_mesh.crs().isValid():
-            mesh_crs = self.lay_mesh.crs()
-        else:
-            mesh_crs = self.project.crs()
-
-        culv_flds = [x[0] for x in self.culv_flds]
-        dlg = dlg_import_culvert_file(culv_flds, mesh_crs, self)
+        mesh_crs = self.lay_mesh.crs() if self.lay_mesh.crs().isValid() else self.project.crs()
+        dlg = dlg_import_culvert_file(list(FIELD_NAMES), mesh_crs, self)
         dlg.setWindowModality(Qt.WindowModality.WindowModal)
-        if not dlg.exec():
+        if not dlg.exec() or not dlg.text_file.filePath():
             return
-
         self.cb_software_select.setCurrentIndex(dlg.cb_soft.currentIndex())
-        txt_path = dlg.text_file.filePath()
-        if not txt_path:
-            return
-
-        self.import_culvert_file(txt_path, dlg.items, dlg.layer_file.filePath(), dlg.layer_crs.crs())
-
-    def to_layer(self, point, mesh_to_layer):
-        """(point in the layer CRS, error) from a point in the mesh CRS."""
-        if mesh_to_layer is None:
-            return point, None
-        try:
-            return mesh_to_layer.transform(point), None
-        except QgsCsException:
-            return None, self.tr("The coordinates cannot be converted to the CRS of the layer.")
+        self.import_culvert_file(dlg.text_file.filePath(), dlg.items, dlg.layer_file.filePath(), dlg.layer_crs.crs())
 
     def import_culvert_file(self, txt_path, items, layer_path, layer_crs):
-        """Create a culvert layer from a culvert text file. items maps field.lower() to [field, file column]."""
-        try:
-            culv_file = read_culvert_file(txt_path)
-        except (CulvertFileError, OSError) as err:
-            self.writeError(self.tr("Error when reading culvert file : {}").format(err))
+        """Create a culvert layer from a culvert file. items maps field.lower() to [field, file column]."""
+        columns = {field: column for field, column in items.values() if field and column}
+        result = culvert_core.import_culvert_file(txt_path, columns, self.mesh, layer_crs, self.project)
+        if result.error:
+            self.writeError(result.error)
             return None
-
-        # Uhaina files give the coordinates of the extremities (in the mesh CRS) instead of the nodes
-        columns = {header.lower(): header for header in culv_file.headers}
-        xy_columns = [columns.get(name) for name in ("x1", "y1", "x2", "y2")]
-        by_xy = all(xy_columns)
-        if not by_xy:
-            for key in ("n1", "n2"):
-                if items[key][1] not in culv_file.headers:
-                    self.writeError(self.tr("Columns of the nodes N1 and N2 are not defined."))
-                    return None
-
-        mesh_to_layer = None
-        if self.lay_mesh.crs().isValid():
-            mesh_to_layer = QgsCoordinateTransform(self.lay_mesh.crs(), layer_crs, self.project)
-
-        layerFields = QgsFields()
-        for fld in self.culv_flds:
-            layerFields.append(QgsField(fld[0], fld[1]))
-
-        # Points are created in the CRS of the layer
-        layer = QgsVectorLayer(
-            f"MultiLineString?crs={layer_crs.authid()}", self.tr("Culverts"), "memory"
-        )
-        layer.setCrs(layer_crs)
-        pr = layer.dataProvider()
-        pr.addAttributes(layerFields)
-        layer.updateFields()
-
-        kinds = {fld.name: fld.kind for fld in FIELDS}
-        features = []
-        rejected = 0
-        for i, row in enumerate(culv_file.rows, 1):
-            try:
-                if by_xy:
-                    x1, y1, x2, y2 = (parse_value(row[col], KIND_FLOAT, col) for col in xy_columns)
-                    mesh_points = [QgsPointXY(x1, y1), QgsPointXY(x2, y2)]
-                    n1, n2 = (self.locator.nearest_node(point)[0] for point in mesh_points)
-                else:
-                    n1 = parse_value(row[items["n1"][1]], KIND_INT, "N1")
-                    n2 = parse_value(row[items["n2"][1]], KIND_INT, "N2")
-
-                attrs = []
-                for fld in self.culv_flds:
-                    key = items[fld[0].lower()][1]
-                    if fld[0] == "N1":
-                        attrs.append(n1)
-                    elif fld[0] == "N2":
-                        attrs.append(n2)
-                    elif key:
-                        attrs.append(parse_value(row[key], kinds[fld[0]], fld[0]))
-                    elif kinds[fld[0]] in (KIND_INT, KIND_FLOAT):
-                        attrs.append(0)
-                    else:
-                        attrs.append("")
-            except CulvertFileError as error:
-                err = str(error)
-            else:
-                if by_xy:
-                    (point_n1, err1), (point_n2, err2) = (self.to_layer(point, mesh_to_layer) for point in mesh_points)
-                    if n1 is None or n2 is None:
-                        self.writeWarning(
-                            self.tr("Culvert {}: extremity not within the mesh, N1/N2 left empty.").format(i)
-                        )
-                else:
-                    point_n1, err1 = MeshUtils.xyFromN(self.native_mesh, n1, mesh_to_layer)
-                    point_n2, err2 = MeshUtils.xyFromN(self.native_mesh, n2, mesh_to_layer)
-                err = " ".join(filter(None, (err1, err2)))
-                if not err:
-                    fet = QgsFeature(layer.fields())
-                    fet.setGeometry(QgsGeometry.fromMultiPolylineXY([[point_n1, point_n2]]))
-                    fet.setAttributes(attrs)
-                    features.append(fet)
-                    continue
-
-            rejected += 1
-            self.writeError(
-                self.tr("Error when importing culvert {i} with error(s) : {err}").format(i=i, err=err)
-            )
-
-        if not features:
+        for row, message in result.rejected:
+            message = self.tr("Error when importing culvert {i} with error(s) : {err}").format(i=row, err=message)
+            self.writeError(message)
+        for message in result.warnings:
+            self.writeWarning(message)
+        if not result.features:
             self.writeError(self.tr("No culvert imported."))
             return None
 
-        pr.addFeatures(features)
+        layer = culvert_core.memory_culvert_layer(layer_crs, self.tr("Culverts"))
+        layer.dataProvider().addFeatures(result.features)
         layer.updateExtents()
-
         if layer_path:
             source = self.write_vector_file(layer, layer_path)
-            if source is None:
-                return None
-            layer = self.add_culvert_layer(source, layer_crs)
+            layer = culvert_core.load_culvert_layer(source, layer_crs) if source else None
             if layer is None:
+                self.writeError(self.tr("Created culvert layer is not valid."))
                 return None
-        else:
-            layer.setCrs(layer_crs)
-            layer.loadNamedStyle(self.file_culv_style)
-            layer.saveDefaultStyle()
-            self.project.addMapLayer(layer)
-            self.cb_lay_culv.setCurrentIndex(self.cb_lay_culv.findData(layer.id(), 32))
 
-        if culv_file.relax is not None:
-            QgsExpressionContextUtils.setLayerVariable(layer, RELAX_VARIABLE, culv_file.relax)
-            if layer is self.lay_culv:
-                self.sb_relax.setValue(culv_file.relax)
-        if by_xy:
+        settings = {"option": result.option}
+        if result.relax is not None:
+            settings["relaxation"] = result.relax
+        self.add_culvert_layer(layer, settings)
+        if result.uhaina:
             self.cb_software_select.setCurrentIndex(SOFT_UHAINA)
+        self.writeInfo(self.tr("Culvert option set to {} for the imported layer.").format(result.option))
 
-        columns = {fld[0]: items[fld[0].lower()][1] for fld in self.culv_flds}
-        option = detect_option(culv_file.rows, columns)
-        self.set_culvert_option(layer, option)
-        self.writeInfo(self.tr("Culvert option set to {} for the imported layer.").format(option))
-
-        if rejected:
+        if result.rejected:
             self.writeWarning(
                 self.tr("{imported} culverts imported, {rejected} rejected.").format(
-                    imported=len(features), rejected=rejected
+                    imported=len(result.features), rejected=len(result.rejected)
                 )
             )
         else:
-            self.writeSuccess(self.tr("{} culverts imported.").format(len(features)))
+            self.writeSuccess(self.tr("{} culverts imported.").format(len(result.features)))
         return layer
-
-
-def correctAngle(angle):
-    if angle < 0.0:
-        angle += 360
-    elif angle > 360.0:
-        angle = angle - 360
-    return angle
-
-
-def segmentAngle(p1, p2):
-    return correctAngle(math.degrees(math.atan2(p2.y() - p1.y(), p2.x() - p1.x())))
-
-
-def calculangle(vertices):
-    angle1 = correctAngle(segmentAngle(vertices[0], vertices[1]) - 180)
-    angle2 = segmentAngle(vertices[-2], vertices[-1])
-
-    return angle1, angle2
-
-
-def is_bottom_dataset(name):
-    """TELEMAC names (BOTTOM, FOND) and MDAL name of the elevation of the nodes (Bed Elevation)."""
-    return any(key in name.lower() for key in ("fond", "bottom", "bed elevation"))
-
-
-def widget_value(ctrl):
-    """Value of a culvert widget as stored in the layer."""
-    if isinstance(ctrl, (QDoubleSpinBox, QSpinBox)):
-        return ctrl.value()
-    if isinstance(ctrl, QComboBox):
-        return ctrl.currentIndex()
-    if isinstance(ctrl, QCheckBox):
-        return 1 if ctrl.checkState() == Qt.CheckState.Checked else 0
-    if isinstance(ctrl, QLineEdit):
-        return ctrl.text()
-    return None
-
-
-def to_integer(n):
-    if not n:
-        return None
-
-    try:
-        int(n)
-    except ValueError:
-        return None
-    else:
-        return int(n)
