@@ -582,18 +582,20 @@ class TestCulvertOption(CulvertManagerTestCase):
         self.assertEqual(self.dock.culvert_option(a), 1)
 
         b.selectAll()
-        self.assertTrue(self.dock.sb_fric.isEnabled())
-        self.assertFalse(self.dock.sb_l12.isEnabled())
+        self.assertFalse(self.dock.sb_fric.isHidden())
+        self.assertTrue(self.dock.sb_l12.isHidden())
         self.dock.cb_lay_culv.setCurrentIndex(self.dock.cb_lay_culv.findData(a.id(), 32))
         self.assertEqual(self.dock.cb_culv_option.currentIndex(), 0)
         a.selectAll()
-        self.assertFalse(self.dock.sb_fric.isEnabled())
-        self.assertTrue(self.dock.sb_l12.isEnabled())
+        self.assertTrue(self.dock.sb_fric.isHidden())
+        self.assertFalse(self.dock.sb_l12.isHidden())
         # Uhaina: no option, its own fields
         self.dock.cb_software_select.setCurrentIndex(1)
-        self.assertFalse(self.dock.cb_culv_option.isEnabled())
-        self.assertTrue(self.dock.sb_l12.isEnabled())
-        self.assertFalse(self.dock.sb_cv.isEnabled())
+        self.assertTrue(self.dock.cb_culv_option.isHidden())
+        self.assertTrue(self.dock.sb_relax.isHidden())
+        self.assertFalse(self.dock.sb_l12.isHidden())
+        self.assertTrue(self.dock.sb_cv.isHidden())
+        self.assertTrue(self.dock.cb_auto_l.isHidden())
 
     def test_export_with_option_1_accepts_empty_option_2_fields(self):
         self.add_mesh()
@@ -626,11 +628,81 @@ class TestResetValues(CulvertManagerTestCase):
         layer.selectAll()
         commits = []
         layer.afterCommitChanges.connect(lambda: commits.append(1))
+        QMessageBox.question = staticmethod(lambda *a, **k: QMessageBox.StandardButton.No)
+        self.dock.btn_res_val.click()
+        self.assertEqual(commits, [])
+        QMessageBox.question = staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes)
         self.dock.btn_res_val.click()
         self.assertEqual(len(commits), 1)
         ft = next(layer.getFeatures())
         self.assertEqual((ft["CE1"], ft["CS1"], ft["AZ"]), (0.5, 1.0, 0))
         self.assertTrue(self.dock.sb_z1.isEnabled())
+
+
+class TestPanel(CulvertManagerTestCase):
+    def test_narrow_dock(self):
+        self.add_mesh()
+        layer = self.add_culvert_layer()
+        self.add_culvert(layer)
+        layer.selectAll()
+        for option in (0, 1):
+            self.dock.cb_culv_option.setCurrentIndex(option)
+            self.assertLessEqual(self.dock.scroll_contents.minimumSizeHint().width(), 360)
+
+    def test_status_tells_what_to_do(self):
+        self.assertIn("mesh", self.dock.lbl_status.text())
+        self.add_mesh()
+        self.assertIn("culvert layer", self.dock.lbl_status.text())
+        layer = self.add_culvert_layer()
+        self.add_culvert(layer)
+        self.add_culvert(layer)
+        self.assertIn("Select a culvert", self.dock.lbl_status.text())
+        layer.selectAll()
+        self.assertIn("2 culverts", self.dock.lbl_status.text())
+        layer.selectByIds([next(layer.getFeatures()).id()])
+        self.assertTrue(self.dock.lbl_status.isHidden())
+        self.assertTrue(self.dock.gb_cur_culv.isEnabled())
+        self.assertEqual(self.dock.lbl_nodes.text(), "1 → 3")
+        layer.startEditing()
+        self.assertIn("edited", self.dock.lbl_status.text())
+        self.assertFalse(self.dock.gb_cur_culv.isEnabled())
+        layer.rollBack()
+
+    def test_problems_list_selects_the_culvert(self):
+        self.add_mesh()
+        layer = self.add_culvert_layer()
+        self.add_culvert(layer, NAME="good")
+        self.add_culvert(layer, NAME="bad", HAUT=0.0)
+        self.dock.verif_culvert()
+        self.assertFalse(self.dock.lst_problems.isHidden())
+        self.assertEqual(self.dock.lst_problems.count(), 1)
+        item = self.dock.lst_problems.item(0)
+        self.assertTrue(item.text().startswith("bad"))
+        self.dock.lst_problems.itemClicked.emit(item)
+        self.assertEqual([ft["NAME"] for ft in layer.getSelectedFeatures()], ["bad"])
+        self.assertEqual(self.dock.cur_culv_id, layer.selectedFeatureIds()[0])
+
+    def test_relaxation_stored_in_the_layer(self):
+        self.add_mesh()
+        a = self.add_culvert_layer(os.path.join(self.folder, "a.shp"))
+        self.dock.sb_relax.setValue(0.35)
+        b = self.add_culvert_layer(os.path.join(self.folder, "b.shp"))
+        self.dock.sb_relax.setValue(0.6)
+        self.dock.cb_lay_culv.setCurrentIndex(self.dock.cb_lay_culv.findData(a.id(), 32))
+        self.assertAlmostEqual(self.dock.sb_relax.value(), 0.35)
+        self.dock.cb_lay_culv.setCurrentIndex(self.dock.cb_lay_culv.findData(b.id(), 32))
+        self.assertAlmostEqual(self.dock.sb_relax.value(), 0.6)
+
+    def test_circular_does_not_change_haut2(self):
+        self.add_mesh()
+        layer = self.add_culvert_layer()
+        self.add_culvert(layer, CIRC=0, HAUT=1.0, HAUT2=0.8, LARG=2.0)
+        layer.selectAll()
+        self.dock.cb_circ.setChecked(True)
+        self.dock.sb_haut1.setValue(1.5)
+        ft = next(layer.getFeatures())
+        self.assertEqual((ft["LARG"], ft["HAUT"], ft["HAUT2"]), (1.5, 1.5, 0.8))
+        self.assertFalse(self.dock.sb_larg.isEnabled())
 
 
 class TestImportDialog(CulvertManagerTestCase):

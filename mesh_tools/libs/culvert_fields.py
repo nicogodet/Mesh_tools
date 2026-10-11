@@ -91,6 +91,43 @@ def used_by_option(name: str, option: int, circular: bool = False) -> bool:
     return name not in OPTION_1_UNUSED and not (name == "LARG" and circular)
 
 
+# Description and unit of each field, used by the dock and the layer style
+# fmt: off
+FIELD_INFO = {
+    "NAME": ("Name", ""), "N1": ("Node 1", ""), "N2": ("Node 2", ""),
+    "CE1": ("Head loss coef. inflow 1", ""), "CE2": ("Head loss coef. inflow 2", ""),
+    "CS1": ("Head loss coef. outflow 1", ""), "CS2": ("Head loss coef. outflow 2", ""),
+    "LARG": ("Width", "m"), "HAUT": ("Height 1", "m"), "HAUT2": ("Height 2 (0: same as height 1)", "m"),
+    "CLAP": ("Valve", ""), "L12": ("Linear head loss coef.", ""), "Z1": ("Elevation 1", "m"),
+    "Z2": ("Elevation 2", "m"), "CV": ("Valve head loss coef.", ""), "C56": ("Flow type 5/6 coef.", ""),
+    "CV5": ("Flow type 5 correction coef.", ""), "C5": ("Flow type 5 coef.", ""),
+    "CT": ("Trash screen head loss coef.", ""), "FRIC": ("Manning coef.", ""), "LENGTH": ("Length", "m"),
+    "CIRC": ("Circular", ""), "d1": ("Angle with the vertical 1", "°"), "d2": ("Angle with the vertical 2", "°"),
+    "a1": ("Angle with the x axis 1", "°"), "a2": ("Angle with the x axis 2", "°"),
+    "AA": ("Automatic angles", ""), "NB_in_//": ("Number in parallel", ""), "AL": ("Automatic length", ""),
+    "AZ": ("Automatic elevations", ""),
+}
+# fmt: on
+
+# TELEMAC flag CLP
+VALVES = (
+    ("0", "No valve (1 <-> 2)"),
+    ("1", "Valve, flow 1 -> 2"),
+    ("2", "Valve, flow 2 -> 1"),
+    ("3", "Closed (no flow)"),
+)
+
+# Groups of the culvert form: (title, field names)
+FORM_GROUPS = (
+    ("Culvert", ("NAME", "N1", "N2", "CLAP", "CIRC", "NB_in_//")),
+    ("Section", ("LARG", "HAUT", "HAUT2", "d1", "d2")),
+    ("Elevations", ("Z1", "Z2", "AZ")),
+    ("Head losses", ("CE1", "CE2", "CS1", "CS2", "L12")),
+    ("Option 2 parameters", ("CV", "C56", "CV5", "C5", "CT", "FRIC", "LENGTH", "AL")),
+    ("Angles", ("a1", "a2", "AA")),
+)
+
+
 def exported_fields(software: int):
     """Fields written in the culvert file, in column order."""
     return sorted((f for f in FIELDS if f.col(software) is not None), key=lambda f: f.col(software))
