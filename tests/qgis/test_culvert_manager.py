@@ -105,7 +105,7 @@ class CulvertManagerTestCase(unittest.TestCase):
                     "CLP": 0, "LBUS": 1.0, "Z1": 10.0, "Z2": 11.0, "CV": 0.0, "C56": 0.0, "CV5": 0.0,
                     "C5": 0.0, "CT": 0.0, "HAUT2": 0.0, "FRIC": 0.0, "LENGTH": 10.0, "CIRC": 1,
                     "D1": 90.0, "D2": 90.0, "A1": 0.0, "A2": 0.0, "AA": 1, "NB_in_//": 1, "AL": 1,
-                    "AZ": 0, "I1": 1, "I2": 3}  # fmt: skip
+                    "AZ": 0, "I1": None, "I2": None}  # fmt: skip
         defaults.update(values)
         for name, value in defaults.items():
             ft[name] = value
@@ -470,7 +470,7 @@ class TestPanel(CulvertManagerTestCase):
         self.add_culvert(layer)
         layer.selectAll()
         self.assertLessEqual(self.dock.scroll_contents.minimumSizeHint().width(), 360)
-        self.assertLessEqual(self.dock.scroll_contents.minimumSizeHint().height(), 600)
+        self.assertLessEqual(self.dock.scroll_contents.minimumSizeHint().height(), 620)
 
     def test_status_tells_what_to_do(self):
         self.assertIn("mesh", self.dock.lbl_status.text())
@@ -486,7 +486,7 @@ class TestPanel(CulvertManagerTestCase):
         layer.selectByIds(bad)
         self.assertTrue(self.dock.lbl_status.isHidden())
         self.assertTrue(self.dock.gb_cur_culv.isEnabled())
-        # nodes computed now from the mesh, not the stored ones (1, 3)
+        # nodes computed now from the mesh, not the stored ones (none)
         self.assertIn("1 → 2", self.dock.lbl_selected.text())
         self.assertIn("HAUT1", self.dock.lbl_selected.text())
 
@@ -573,6 +573,101 @@ class TestMeshDataset(CulvertManagerTestCase):
         self.assertFalse(culvert_core.is_bottom_dataset("VELOCITY U"))
         self.add_mesh()
         self.assertEqual(self.dock.cb_dataset_mesh.currentText(), "Bed Elevation")
+
+
+def renumbered_mesh(path, nx=15, ny=12):
+    """Same nodes and faces as grid_mesh, nodes numbered backwards: node n becomes nx * ny + 1 - n."""
+    count = nx * ny
+    with open(path, "w") as f:
+        f.write("MESH2D\n")
+        e = 1
+        for j in range(ny - 1):
+            for i in range(nx - 1):
+                a = j * nx + i + 1
+                face = (a, a + 1, a + nx), (a + 1, a + nx + 1, a + nx)
+                for tri in face:
+                    f.write(f"E3T {e} " + " ".join(str(count + 1 - n) for n in tri) + " 1\n")
+                    e += 1
+        for new in range(1, count + 1):
+            old = count + 1 - new
+            f.write(f"ND {new} {(old - 1) % nx * 10.0} {(old - 1) // nx * 10.0} {old * 0.1:.1f}\n")
+    return count
+
+
+class TestRenumberedMesh(CulvertManagerTestCase):
+    """Import the culvert file of a mesh, switch to the renumbered mesh, export: only the nodes change."""
+
+    TEXT = (
+        "Relaxation, Number of culverts\n0.3 2\n"
+        "I1 I2 CE1 CE2 CS1 CS2 LRG HAUT1 CLP LBUS Z1 Z2 CV C56 CV5 C5 CT HAUT2 FRIC LENGTH CIRC D1 D2 A1 A2 AA\n"
+        "17 52 0.5 0.5 1.0 1.0 1.2 1.2 1 0.2 3.25 2.75 0.0 0.0 0.0 0.0 0.0 1.2 0.0 0.0 1 0. 0. 30. 210. 0\n"
+        "100 101 0.4 0.4 0.8 0.8 2.0 0.8 0 0.1 1.5 1.4 0.0 0.0 0.0 0.0 0.0 0.8 0.0 0.0 0 0. 0. 0. 180. 0\n"
+    )
+
+    def test_import_switch_mesh_export(self):
+        old_path = os.path.join(self.folder, "old.2dm")
+        new_path = os.path.join(self.folder, "new.2dm")
+        grid_mesh(old_path)
+        count = renumbered_mesh(new_path)
+        meshes = []
+        for path, name in ((old_path, "old mesh"), (new_path, "new mesh")):
+            mesh = QgsMeshLayer(path, name, "mdal")
+            mesh.setCrs(QgsCoordinateReferenceSystem(CRS))
+            self.project.addMapLayer(mesh)
+            meshes.append(mesh)
+        txt = os.path.join(self.folder, "culverts.txt")
+        with open(txt, "w") as f:
+            f.write(self.TEXT)
+
+        self.dock.cb_lay_mesh.setLayer(meshes[0])
+        layer = self.dock.import_culvert_file(
+            txt, items_of(txt), os.path.join(self.folder, "culverts.gpkg"), QgsCoordinateReferenceSystem(CRS)
+        )
+        self.assertEqual(layer.featureCount(), 2)
+        self.dock.cb_lay_mesh.setLayer(meshes[1])
+        lines = self.export(0)
+        problems = [self.dock.lst_problems.item(i).text() for i in range(self.dock.lst_problems.count())]
+        self.assertIsNotNone(lines, problems)
+        self.assertEqual(problems, [])
+
+        self.assertIn("2 culverts have other nodes", self.dock.log.toPlainText())
+        self.assertEqual(lines[1], "0.3\t2")
+        header = lines[2].split("\t")
+        source = [row.split() for row in self.TEXT.splitlines()[3:]]
+        # same order as the imported file
+        for written, original in zip(lines[3:], self.TEXT.splitlines()[3:]):
+            values = written.split("\t")
+            original = original.split()
+            self.assertEqual(int(values[0]), count + 1 - int(original[0]))
+            self.assertEqual(int(values[1]), count + 1 - int(original[1]))
+            for i, name in enumerate(header[2:26], 2):
+                self.assertEqual(float(values[i]), float(original[i]), name)
+        self.assertEqual(len(source), 2)
+
+
+class TestWarnings(CulvertManagerTestCase):
+    def test_zero_height_warns_without_blocking(self):
+        self.add_mesh()
+        layer = self.add_culvert_layer()
+        self.add_culvert(layer, HAUT1=0.0)
+        lines = self.export(0)
+        self.assertIsNotNone(lines)
+        self.assertEqual(self.dock.lst_problems.count(), 1)
+        self.assertIn("HAUT1", self.dock.lst_problems.item(0).text())
+
+    def test_moved_mesh_warns(self):
+        """Nodes stored for a mesh, exported on a shifted mesh: the extremities are away from the new nodes."""
+        self.add_mesh()
+        layer = self.add_culvert_layer()
+        self.add_culvert(layer, "MultiLineString((0 0, 100 0))", I1=4, I2=3)
+        self.dock.verif_culvert()
+        texts = [self.dock.lst_problems.item(i).text() for i in range(self.dock.lst_problems.count())]
+        self.assertEqual(texts, [])
+        self.add_culvert(layer, "MultiLineString((3 1, 100 0))", NAME="moved", I1=4, I2=3)
+        self.dock.verif_culvert()
+        texts = [self.dock.lst_problems.item(i).text() for i in range(self.dock.lst_problems.count())]
+        self.assertEqual(len(texts), 1)
+        self.assertIn("Extremity 1 is 3.16 from its node 1", texts[0])
 
 
 class TestLegacyLayer(CulvertManagerTestCase):

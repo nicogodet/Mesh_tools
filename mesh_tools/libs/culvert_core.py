@@ -7,6 +7,7 @@ QGIS core only: no widget, no iface.
 
 import math
 import os
+import re
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
@@ -442,27 +443,51 @@ def update_auto_values(layer, context: MeshContext, dataset_group, project=None)
 ######################################################################################
 
 
-def export_records(layer, context: MeshContext, dataset_group, software, option, project=None, features=None):
-    """Records of the culverts as written in the file, and the list of [culvert name, problem, feature id].
+# Distance from a culvert extremity to its new node above which the user is warned when the nodes change (mesh CRS
+# units): a renumbering alone keeps it 0, more means the mesh geometry changed
+NODE_TOLERANCE = 0.01
+
+
+@dataclass
+class ExportResult:
+    """Records of the culverts as written in the file, and what was found on the way.
+
+    problems block the export, warnings do not; both are [culvert name, message, feature id].
+    """
+
+    records: List[dict] = field(default_factory=list)
+    problems: List[list] = field(default_factory=list)
+    warnings: List[list] = field(default_factory=list)
+    # Culverts whose nodes differ from the ones stored in the layer (new or renumbered mesh)
+    renumbered: int = 0
+
+
+def export_records(
+    layer, context: MeshContext, dataset_group, software, option, project=None, features=None
+) -> ExportResult:
+    """Check the culverts and build the records of the culvert file.
 
     features: the culverts to check, all the features of the layer by default.
 
     Nothing is read from the automatic fields: nodes, Z, length and angles are computed again, so the file
     always matches the mesh and the geometries, and the layer is not modified.
     """
+    result = ExportResult()
     culv_to_mesh = context.transform_from(layer.crs(), project)
     if culv_to_mesh is None:
-        return [], [[layer.name(), tr("The culvert layer or the mesh has no valid CRS."), None]]
+        result.problems.append([layer.name(), tr("The culvert layer or the mesh has no valid CRS."), None])
+        return result
 
-    records = []
-    problems = []
     for feature in layer.getFeatures() if features is None else features:
         name = culvert_name(feature)
         record = record_from_feature(feature)
+        stored = (record["I1"], record["I2"])
 
         values, errors = auto_values(context, culv_to_mesh, feature, dataset_group)
         record.update(values)
-        problems += [[name, error, feature.id()] for error in errors]
+        result.problems += [[name, error, feature.id()] for error in errors]
+        renumbered = None not in stored and (record["I1"], record["I2"]) != stored
+        result.renumbered += renumbered
 
         # One line per kind of problem and culvert, to keep the list short
         invalid, not_positive = [], []
@@ -470,17 +495,127 @@ def export_records(layer, context: MeshContext, dataset_group, software, option,
             (not_positive if code == "not_positive" else invalid).append(field_name)
         if invalid:
             message = tr("Values missing or not correct: {}.").format(", ".join(invalid))
-            problems.append([name, message, feature.id()])
+            result.problems.append([name, message, feature.id()])
         if not_positive:
-            message = tr("Values that must be strictly positive: {}.").format(", ".join(not_positive))
-            problems.append([name, message, feature.id()])
+            # Accepted by TELEMAC (no flow through the culvert): may be wanted to close a culvert
+            message = tr("Zero or negative values, no flow in TELEMAC: {}.").format(", ".join(not_positive))
+            result.warnings.append([name, message, feature.id()])
 
         vertices = mesh_vertices(feature.geometry(), culv_to_mesh)
         if vertices is not None:
             record["_xy"] = (vertices[0].x(), vertices[0].y(), vertices[-1].x(), vertices[-1].y())
-        records.append(record)
+            # Culverts imported for another mesh lie on its nodes: away from the new nodes, the mesh geometry changed
+            for extremity, vertex, node in ((1, vertices[0], record["I1"]), (2, vertices[-1], record["I2"])):
+                if node is None or not renumbered:
+                    continue
+                distance = vertex.distance(QgsPointXY(context.native.vertex(node - 1)))
+                if distance > NODE_TOLERANCE:
+                    message = tr("Extremity {} is {:.2f} from its node {}.").format(extremity, distance, node)
+                    result.warnings.append([name, message, feature.id()])
+        result.records.append(record)
 
-    return records, problems
+    return result
+
+
+######################################################################################
+#                                   RENUMBERING                                      #
+######################################################################################
+
+
+@dataclass
+class RenumberResult:
+    text: str = ""
+    # (row number, (old I1, old I2), (new I1, new I2))
+    changed: List[tuple] = field(default_factory=list)
+    # (row number, message)
+    warnings: List[Tuple[int, str]] = field(default_factory=list)
+    errors: List[Tuple[int, str]] = field(default_factory=list)
+
+
+def _replace_tokens(line, tab, replacements):
+    """Replace cells of a data line given by index, keeping the separators and the other cells as written."""
+    body = line.rstrip("\r\n")
+    ending = line[len(body):]
+    if tab:
+        cells = body.split("\t")
+        for index, value in replacements.items():
+            cells[index] = value
+        return "\t".join(cells) + ending
+    parts = re.split(r"(\s+)", body)
+    tokens = [i for i, part in enumerate(parts) if part and not part.isspace()]
+    for index, value in replacements.items():
+        parts[tokens[index]] = value
+    return "".join(parts) + ending
+
+
+def renumber_culvert_file(path, old: MeshContext, new: MeshContext, tolerance=NODE_TOLERANCE, project=None):
+    """TELEMAC culvert file with the nodes I1 I2 of another mesh (renumbered or remeshed), everything else as is.
+
+    Each node of the old mesh is replaced by the node of the new mesh at the same place (nearest node); a warning
+    is given when they are more than tolerance apart.
+    """
+    result = RenumberResult()
+    with open(path, "r", encoding="utf-8", errors="replace") as txt_file:
+        lines = txt_file.readlines()
+    if len(lines) < 3:
+        result.errors.append((0, tr("The file is too short: 3 header lines are expected.")))
+        return result
+
+    tab = "\t" in lines[2]
+    headers = lines[2].strip("\r\n").split("\t") if tab else lines[2].split()
+    names = [field_for_header(header.strip()) for header in headers]
+    if "I1" not in names or "I2" not in names:
+        if {"x1", "y1", "x2", "y2"} <= {header.strip().lower() for header in headers}:
+            message = tr("Uhaina files give the coordinates of the culverts: they do not depend on the mesh numbering.")
+        else:
+            message = tr("Columns of the nodes N1 and N2 are not defined.")
+        result.errors.append((0, message))
+        return result
+    columns = (names.index("I1"), names.index("I2"))
+
+    old_to_new = None
+    if old.crs.isValid() and new.crs.isValid() and old.crs != new.crs:
+        old_to_new = QgsCoordinateTransform(old.crs, new.crs, project or QgsProject.instance())
+
+    output = lines[:3]
+    row = 0
+    for line in lines[3:]:
+        if not line.strip():
+            output.append(line)
+            continue
+        row += 1
+        cells = line.strip("\r\n").split("\t") if tab else line.split()
+        try:
+            nodes = [parse_value(cells[column], KIND_INT, ("I1", "I2")[k]) for k, column in enumerate(columns)]
+        except (CulvertFileError, IndexError) as error:
+            result.errors.append((row, str(error)))
+            output.append(line)
+            continue
+
+        new_nodes = []
+        for node in nodes:
+            point, error = MeshUtils.xyFromN(old.native, node, old_to_new)
+            if error is None:
+                found, error = new.locator.nearest_node(point)
+            if error is not None:
+                result.errors.append((row, tr("Node {} : {}").format(node, error)))
+                break
+            distance = point.distance(QgsPointXY(new.native.vertex(found - 1)))
+            if distance > tolerance:
+                result.warnings.append(
+                    (row, tr("Node {} is {:.2f} from the new node {}.").format(node, distance, found))
+                )
+            new_nodes.append(found)
+        if len(new_nodes) < 2:
+            output.append(line)
+            continue
+
+        if new_nodes != nodes:
+            result.changed.append((row, tuple(nodes), tuple(new_nodes)))
+        output.append(_replace_tokens(line, tab, {columns[0]: str(new_nodes[0]), columns[1]: str(new_nodes[1])}))
+
+    result.text = "".join(output)
+    return result
 
 
 ######################################################################################

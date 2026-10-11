@@ -32,7 +32,7 @@ from html import escape
 from qgis.core import Qgis, QgsApplication
 from qgis.PyQt import uic
 from qgis.PyQt.QtCore import Qt, pyqtSignal
-from qgis.PyQt.QtGui import QStandardItem, QStandardItemModel
+from qgis.PyQt.QtGui import QColor, QStandardItem, QStandardItemModel
 from qgis.PyQt.QtWidgets import QFileDialog, QListWidgetItem
 
 from ..mesh_tools_dockwidget import MeshToolsDockWidget
@@ -310,7 +310,7 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
             escape(self.tr("Nodes {} → {}").format(show("I1"), show("I2"))),
             escape(self.tr("Elevations {} → {} m").format(show("Z1"), show("Z2"))),
         ]
-        _, problems = culvert_core.export_records(
+        result = culvert_core.export_records(
             self.lay_culv,
             self.mesh,
             self.dataset_group(),
@@ -318,7 +318,8 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
             self.culvert_option(),
             features=[feature],
         )
-        lines += [f"<span style='color:#c0392b'>{escape(message)}</span>" for _, message, _ in problems]
+        lines += [f"<span style='color:#c0392b'>{escape(message)}</span>" for _, message, _ in result.problems]
+        lines += [f"<span style='color:#d35400'>{escape(message)}</span>" for _, message, _ in result.warnings]
         if self.lay_culv.isEditable() and self.lay_culv.isModified():
             lines.append(f"<i>{escape(self.tr('Unsaved edits in the culvert layer.'))}</i>")
         return "<br>".join(lines)
@@ -346,10 +347,10 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
             self.writeSuccess(self.tr("Automatic values updated"))
         self.cur_culv_changed()
 
-    def export_records(self):
+    def export_records(self) -> culvert_core.ExportResult:
         if not self.ready():
             name = self.lay_culv.name() if self.lay_culv else ""
-            return [], [[name, self.tr("Import a mesh first."), None]]
+            return culvert_core.ExportResult(problems=[[name, self.tr("Import a mesh first."), None]])
         return culvert_core.export_records(
             self.lay_culv, self.mesh, self.dataset_group(), self.software_select, self.culvert_option(), self.project
         )
@@ -357,21 +358,35 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
     def verif_culvert(self):
         if not self.lay_culv:
             return
-        _, problems = self.export_records()
-        self.show_problems(problems)
-        if not problems:
+        result = self.export_records()
+        self.show_problems(result.problems, result.warnings)
+        self.report_renumbered(result)
+        if not result.problems:
             self.writeSuccess(self.tr("All culverts are valid"))
 
-    def show_problems(self, problems):
-        """List the problems found; a click selects the culvert."""
+    def show_problems(self, problems, warnings=()):
+        """List the problems (blocking the export) then the warnings; a click selects the culvert."""
         self.lst_problems.clear()
-        for name, message, fid in problems:
-            item = QListWidgetItem(f"{name} : {message}")
-            item.setData(Qt.ItemDataRole.UserRole, fid)
-            self.lst_problems.addItem(item)
-        self.lst_problems.setVisible(bool(problems))
+        for entries, color in ((problems, QColor("#c0392b")), (warnings, QColor("#d35400"))):
+            for name, message, fid in entries:
+                item = QListWidgetItem(f"{name} : {message}")
+                item.setData(Qt.ItemDataRole.UserRole, fid)
+                item.setForeground(color)
+                self.lst_problems.addItem(item)
+        self.lst_problems.setVisible(bool(problems) or bool(warnings))
         if problems:
             self.writeError(self.tr("{} problems found, see the list above.").format(len(problems)))
+        if warnings:
+            self.writeWarning(self.tr("{} warnings, see the list above.").format(len(warnings)))
+
+    def report_renumbered(self, result):
+        if result.renumbered:
+            self.writeInfo(
+                self.tr(
+                    "{} culverts have other nodes than the ones stored in the layer (new or renumbered mesh): "
+                    "the file uses the nodes of the current mesh."
+                ).format(result.renumbered)
+            )
 
     def problem_clicked(self, item):
         fid = item.data(Qt.ItemDataRole.UserRole)
@@ -384,18 +399,19 @@ class CulvertManager(MeshToolsDockWidget, FORM_CLASS):
     def create_file(self):
         if not self.lay_culv:
             return
-        records, problems = self.export_records()
-        self.show_problems(problems)
-        if problems:
+        result = self.export_records()
+        self.show_problems(result.problems, result.warnings)
+        if result.problems:
             self.writeError(self.tr("File creation is not possible, some culverts are not valid"))
             return
+        self.report_renumbered(result)
 
         culv_file_name, _ = QFileDialog.getSaveFileName(self, self.tr("Culvert file"), "", self.tr("Text File (*.txt)"))
         if not culv_file_name:
             return
         try:
             write_culvert_file(
-                culv_file_name, records, self.software_select, self.sb_relax.value(), self.culvert_option()
+                culv_file_name, result.records, self.software_select, self.sb_relax.value(), self.culvert_option()
             )
         except (CulvertFileError, OSError) as err:
             self.writeError(self.tr("Error during culvert file creation : {}").format(err))

@@ -98,9 +98,14 @@ class CulvertAlgorithm(QgsProcessingAlgorithm):
             dataset = culvert_core.layer_setting(culvert_layer, culvert_core.BOTTOM_VARIABLE) or mesh.default_dataset()
         return mesh, mesh.dataset_group(dataset) if dataset else None
 
-    def report(self, problems, feedback):
-        for name, message, _ in problems:
+    def report(self, result, feedback):
+        for name, message, _ in result.problems:
             feedback.reportError(f"{name} : {message}")
+        for name, message, _ in result.warnings:
+            feedback.pushWarning(f"{name} : {message}")
+        if result.renumbered:
+            message = self.tr("{} culverts have other nodes than the ones stored in the layer (new mesh?).")
+            feedback.pushInfo(message.format(result.renumbered))
 
 
 class CheckCulverts(CulvertAlgorithm):
@@ -125,29 +130,32 @@ class CheckCulverts(CulvertAlgorithm):
             )
         )
         self.addOutput(QgsProcessingOutputNumber("PROBLEMS", self.tr("Number of problems")))
+        self.addOutput(QgsProcessingOutputNumber("WARNINGS", self.tr("Number of warnings")))
 
     def processAlgorithm(self, parameters, context, feedback):
         layer, mesh, group, software, option = self.culvert_inputs(parameters, context)
-        _, problems = culvert_core.export_records(layer, mesh, group, software, option, context.project())
-        self.report(problems, feedback)
+        result = culvert_core.export_records(layer, mesh, group, software, option, context.project())
+        self.report(result, feedback)
 
-        results = {"PROBLEMS": len(problems)}
+        results = {"PROBLEMS": len(result.problems), "WARNINGS": len(result.warnings)}
         fields = QgsFields()
         fields.append(QgsField("culvert", QMetaType.Type.QString))
         fields.append(QgsField("problem", QMetaType.Type.QString))
+        fields.append(QgsField("blocking", QMetaType.Type.Bool))
         sink, dest = self.parameterAsSink(
             parameters, "OUTPUT", context, fields, QgsWkbTypes.Type.MultiLineString, layer.crs()
         )
         if sink is not None:
-            for name, message, fid in problems:
+            entries = [(entry, True) for entry in result.problems] + [(entry, False) for entry in result.warnings]
+            for (name, message, fid), blocking in entries:
                 if fid is None:
                     continue
                 feature = layer.getFeature(fid)
                 feature.setFields(fields, True)
-                feature.setAttributes([name, message])
+                feature.setAttributes([name, message, blocking])
                 sink.addFeature(feature, QgsFeatureSink.Flag.FastInsert)
             results["OUTPUT"] = dest
-        if not problems:
+        if not result.problems:
             feedback.pushInfo(self.tr("All culverts are valid"))
         return results
 
@@ -184,9 +192,9 @@ class ExportCulvertFile(CulvertAlgorithm):
 
     def processAlgorithm(self, parameters, context, feedback):
         layer, mesh, group, software, option = self.culvert_inputs(parameters, context)
-        records, problems = culvert_core.export_records(layer, mesh, group, software, option, context.project())
-        if problems:
-            self.report(problems, feedback)
+        result = culvert_core.export_records(layer, mesh, group, software, option, context.project())
+        self.report(result, feedback)
+        if result.problems:
             raise QgsProcessingException(self.tr("File creation is not possible, some culverts are not valid"))
 
         if parameters.get("RELAXATION") is None:
@@ -195,11 +203,79 @@ class ExportCulvertFile(CulvertAlgorithm):
             relax = self.parameterAsDouble(parameters, "RELAXATION", context)
         path = self.parameterAsFileOutput(parameters, "OUTPUT", context)
         try:
-            write_culvert_file(path, records, software, relax, option)
+            write_culvert_file(path, result.records, software, relax, option)
         except (CulvertFileError, OSError) as err:
             raise QgsProcessingException(str(err))
-        feedback.pushInfo(self.tr("{} culverts written.").format(len(records)))
+        feedback.pushInfo(self.tr("{} culverts written.").format(len(result.records)))
         return {"OUTPUT": path}
+
+
+class RenumberCulvertFile(CulvertAlgorithm):
+    def name(self):
+        return "renumberculvertfile"
+
+    def displayName(self):
+        return self.tr("Renumber culvert file for another mesh")
+
+    def shortHelpString(self):
+        return self.tr(
+            "Rewrites a TELEMAC culvert file for a renumbered (or remeshed) mesh: each node I1, I2 of the mesh of the "
+            "file is replaced by the node of the new mesh at the same place. Everything else is kept as written. A "
+            "warning is given for each node farther than the tolerance from the new node (the mesh geometry changed)."
+        )
+
+    def initAlgorithm(self, config=None):
+        self.addParameter(
+            QgsProcessingParameterFile(
+                "INPUT", self.tr("Culvert file"), QgsProcessingParameterFile.Behavior.File, fileFilter="Text (*.txt)"
+            )
+        )
+        self.addParameter(QgsProcessingParameterMeshLayer("MESH", self.tr("Mesh of the culvert file")))
+        self.addParameter(QgsProcessingParameterMeshLayer("NEW_MESH", self.tr("New mesh")))
+        self.addParameter(
+            QgsProcessingParameterNumber(
+                "TOLERANCE",
+                self.tr("Distance between old and new node giving a warning (mesh units)"),
+                QgsProcessingParameterNumber.Type.Double,
+                defaultValue=culvert_core.NODE_TOLERANCE,
+                minValue=0.0,
+            )
+        )
+        self.addParameter(
+            QgsProcessingParameterFileDestination("OUTPUT", self.tr("New culvert file"), self.tr("Text file (*.txt)"))
+        )
+        self.addOutput(QgsProcessingOutputNumber("CHANGED", self.tr("Culverts with new nodes")))
+        self.addOutput(QgsProcessingOutputNumber("WARNINGS", self.tr("Nodes farther than the tolerance")))
+
+    def processAlgorithm(self, parameters, context, feedback):
+        path = self.parameterAsFile(parameters, "INPUT", context)
+        old = self.parameterAsMeshLayer(parameters, "MESH", context)
+        new = self.parameterAsMeshLayer(parameters, "NEW_MESH", context)
+        if old is None or new is None:
+            raise QgsProcessingException(self.tr("The mesh layer is not valid."))
+        result = culvert_core.renumber_culvert_file(
+            path,
+            culvert_core.mesh_context(old),
+            culvert_core.mesh_context(new),
+            self.parameterAsDouble(parameters, "TOLERANCE", context),
+            context.project(),
+        )
+        for row, message in result.errors:
+            feedback.reportError(self.tr("Culvert {} : {}").format(row, message) if row else message)
+        if result.errors:
+            raise QgsProcessingException(self.tr("The culvert file cannot be renumbered."))
+        for row, message in result.warnings:
+            feedback.pushWarning(self.tr("Culvert {} : {}").format(row, message))
+        for row, before, after in result.changed:
+            feedback.pushInfo(self.tr("Culvert {} : {} {} -> {} {}").format(row, *before, *after))
+
+        output = self.parameterAsFileOutput(parameters, "OUTPUT", context)
+        try:
+            with open(output, "w", encoding="utf-8", newline="") as txt_file:
+                txt_file.write(result.text)
+        except OSError as err:
+            raise QgsProcessingException(str(err))
+        return {"OUTPUT": output, "CHANGED": len(result.changed), "WARNINGS": len(result.warnings)}
 
 
 class CulvertLayerPostProcessor(QgsProcessingLayerPostProcessorInterface):
@@ -309,5 +385,5 @@ class MeshToolsProvider(QgsProcessingProvider):
         return QIcon(ICON)
 
     def loadAlgorithms(self):
-        for algorithm in (ImportCulvertFile(), CheckCulverts(), ExportCulvertFile()):
+        for algorithm in (ImportCulvertFile(), CheckCulverts(), ExportCulvertFile(), RenumberCulvertFile()):
             self.addAlgorithm(algorithm)

@@ -20,6 +20,12 @@ Prepares the culverts of a TELEMAC (`CULVERTS DATA FILE`) or Uhaina model from a
    relaxation, then "Check" and "Create culvert file…". Nodes and automatic values are always computed again for the
    file.
 
+**New or renumbered mesh.** To update a culvert file after the mesh was renumbered (or remeshed): import the file
+with the mesh it was made for, select the new mesh, then "Create culvert file…": only the nodes change, the panel
+says how many culverts got new nodes, and warns when an extremity is no longer on a node (the mesh geometry changed).
+The Processing algorithm *Renumber culvert file for another mesh* does it in one step, from file to file, keeping the
+file as written except the nodes.
+
 The fields have the TELEMAC names (`I1 I2 CE1 CE2 CS1 CS2 LRG HAUT1 CLP LBUS Z1 Z2 CV C56 CV5 C5 CT HAUT2 FRIC LENGTH
 CIRC D1 D2 A1 A2 AA`, plus `NAME`, `AL`, `AZ` and `NB_in_//` for Uhaina). Layers made by older versions (`N1`, `LARG`,
 `HAUT`, `CLAP`, `L12`...) are still read.
@@ -28,7 +34,7 @@ The mesh, the bottom dataset, the culvert option and the relaxation are stored i
 style (inside the GeoPackage, or a `.qml` next to a shapefile).
 
 The same operations are available as Processing algorithms (provider *Mesh Tools*: import culvert file, check
-culverts, export culvert file), and the expression functions `mesh_vertex_index()` and `mesh_vertex_value()` query a
+culverts, export culvert file, renumber culvert file for another mesh), and the expression functions `mesh_vertex_index()` and `mesh_vertex_value()` query a
 mesh from any layer while the plugin is loaded.
 
 ## Development

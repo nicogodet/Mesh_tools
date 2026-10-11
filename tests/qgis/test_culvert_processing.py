@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import os
+import re
 import unittest
 
 from .utilities import make_temp_folder, set_canvas_crs  # isort: skip
@@ -78,7 +79,75 @@ class TestCulvertProcessing(unittest.TestCase):
 
     def test_algorithms_are_registered(self):
         ids = {alg.id() for alg in QgsApplication.processingRegistry().providerById("meshtools").algorithms()}
-        self.assertEqual(ids, {"meshtools:importculvertfile", "meshtools:checkculverts", "meshtools:exportculvertfile"})
+        expected = {"importculvertfile", "checkculverts", "exportculvertfile", "renumberculvertfile"}
+        self.assertEqual(ids, {f"meshtools:{name}" for name in expected})
+
+    def renumbered_mesh(self, shift=0.0):
+        """The grid mesh with the nodes numbered backwards (node n -> count + 1 - n), moved by shift."""
+        nx, ny = 30, 24
+        count = nx * ny
+        path = os.path.join(self.folder, f"renumbered{shift}.2dm")
+        with open(path, "w") as f:
+            f.write("MESH2D\n")
+            e = 1
+            for j in range(ny - 1):
+                for i in range(nx - 1):
+                    a = j * nx + i + 1
+                    for tri in ((a, a + 1, a + nx), (a + 1, a + nx + 1, a + nx)):
+                        f.write(f"E3T {e} " + " ".join(str(count + 1 - n) for n in tri) + " 1\n")
+                        e += 1
+            for new in range(1, count + 1):
+                old = count + 1 - new
+                f.write(f"ND {new} {(old - 1) % nx * 10.0 + shift} {(old - 1) // nx * 10.0} 0.0\n")
+        mesh = QgsMeshLayer(path, "renumbered", "mdal")
+        mesh.setCrs(QgsCoordinateReferenceSystem(CRS))
+        self.project.addMapLayer(mesh)
+        return mesh, count
+
+    def test_renumber_culvert_file(self):
+        new_mesh, count = self.renumbered_mesh()
+        text = (
+            "Relaxation, Number of culverts\n0.2 2\n"
+            "I1\tI2\tCE1\tNAME\n"
+            "198\t661\t0.50\tfirst culvert\n"
+            "\n"
+            "1\t2\t0.25\t\n"
+        )
+        source = os.path.join(self.folder, "old.txt")
+        with open(source, "w") as f:
+            f.write(text)
+        out = os.path.join(self.folder, "new.txt")
+        result = self.run_alg("renumberculvertfile", INPUT=source, MESH=self.mesh, NEW_MESH=new_mesh, OUTPUT=out)
+        self.assertEqual((result["CHANGED"], result["WARNINGS"]), (2, 0))
+        with open(out) as f:
+            written = f.read()
+        expected = text.replace("198\t661", f"{count + 1 - 198}\t{count + 1 - 661}").replace(
+            "1\t2\t0.25", f"{count}\t{count - 1}\t0.25"
+        )
+        self.assertEqual(written, expected)
+
+    def test_renumber_space_separated_file_and_moved_mesh(self):
+        # shifted to the left: the border nodes of the file (x = 0) stay within the new mesh
+        new_mesh, count = self.renumbered_mesh(shift=-2.0)
+        out = os.path.join(self.folder, "new.txt")
+        result = self.run_alg("renumberculvertfile", INPUT=SIPHON, MESH=self.mesh, NEW_MESH=new_mesh, OUTPUT=out)
+        self.assertEqual(result["WARNINGS"], 2)
+        with open(SIPHON) as f:
+            original = f.read().splitlines()
+        with open(out) as f:
+            written = f.read().splitlines()
+        self.assertEqual(written[:3], original[:3])
+        self.assertEqual(written[3].split()[2:], original[3].split()[2:])
+        self.assertEqual(written[3].split()[:2], [str(count + 1 - 198), str(count + 1 - 661)])
+        # separators kept as written
+        self.assertEqual(re.findall(r"\s+", written[3]), re.findall(r"\s+", original[3]))
+
+    def test_renumber_refuses_uhaina_files(self):
+        path = os.path.join(self.folder, "uhaina.txt")
+        with open(path, "w") as f:
+            f.write("Culvert count\n1\nX1\tY1\tZ1\tX2\tY2\tZ2\n0\t0\t1\t10\t0\t1\n")
+        with self.assertRaises(QgsProcessingException):
+            self.run_alg("renumberculvertfile", INPUT=path, MESH=self.mesh, NEW_MESH=self.mesh, OUTPUT=path + ".out")
 
     def test_import_check_export(self):
         result, layer = self.import_siphon()
