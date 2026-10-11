@@ -495,7 +495,7 @@ class TestFormats(CulvertManagerTestCase):
             path = os.path.join(folder, f"culv.{extension}")
             layer = self.add_culvert_layer(path)
             reopened = QgsVectorLayer(layer.source(), "x", "ogr")
-            self.assertEqual(reopened.renderer().type(), "categorizedSymbol")
+            self.assertEqual(reopened.renderer().type(), "RuleRenderer")
 
     def test_import_in_a_geopackage_keeps_its_other_layers(self):
         self.add_mesh()
