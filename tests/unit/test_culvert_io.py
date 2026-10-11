@@ -130,8 +130,8 @@ class TestWrite(unittest.TestCase):
                     "program rd\n integer :: i1,i2,clp,circ,aa,ios\n"
                     " double precision :: v(24)\n"
                     " read(*,*)\n read(*,*)\n read(*,*)\n"
-                    " read(*,*,iostat=ios) i1,i2,v(1),v(2),v(3),v(4),v(5),v(6),clp,v(7),v(8),v(9),"
-                    "v(10),v(11),v(12),v(13),v(14),v(15),v(16),v(17),circ,v(18),v(19),v(20),v(21),aa\n"
+                    " read(*,*,iostat=ios) i1,i2,v(1),v(2),v(3),v(4),v(5),v(6),clp,v(7),v(8),v(9), &\n"
+                    "   v(10),v(11),v(12),v(13),v(14),v(15),v(16),v(17),circ,v(18),v(19),v(20),v(21),aa\n"
                     " print *, ios\nend program\n"
                 )
             exe = os.path.join(folder, "rd")

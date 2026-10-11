@@ -240,7 +240,7 @@ def main(path):
     message, ok = layer.saveNamedStyle(path, categories)
     if not ok:
         raise SystemExit(message)
-    print("written", path)
+    print("written", path)  # noqa: T201
 
 
 if __name__ == "__main__":

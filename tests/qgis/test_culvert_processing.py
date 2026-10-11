@@ -5,7 +5,7 @@ import unittest
 
 from .utilities import make_temp_folder, set_canvas_crs  # isort: skip
 
-import processing  # noqa: E402
+from qgis import processing  # noqa: E402
 
 from processing.core.Processing import Processing  # noqa: E402
 from qgis.core import (  # noqa: E402

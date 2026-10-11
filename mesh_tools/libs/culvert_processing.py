@@ -299,7 +299,7 @@ class ImportCulvertFile(CulvertAlgorithm):
 
 
 class MeshToolsProvider(QgsProcessingProvider):
-    def id(self):
+    def id(self):  # noqa: A003 (QgsProcessingProvider API)
         return "meshtools"
 
     def name(self):
